@@ -1,0 +1,24 @@
+# 环境与密钥
+.env
+.venv/
+venv/
+
+# 运行时产物
+data/*.db
+data/charts/
+logs/*.jsonl
+# 脱敏后的验证日志作为提交材料保留（自动过滤密钥，见 app/runlog.py）
+!logs/validation_*.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 演示素材（视频体积大，按需单独提交）
+docs/*.mp4
+docs/*.gif
