@@ -809,7 +809,10 @@ function buildSessionNode(session, expanded) {
 }
 
 function formatTime(iso) {
-  return iso ? String(iso).replace("T", " ") : "—";
+  if (!iso) return "—";
+  // 数据库存的是带时区的 ISO 时间（如 2026-11-02T17:19:38+08:00），
+  // 展示时去掉 T 和时区后缀，只留「年月日 时分秒」；存储层仍保留完整时区信息
+  return String(iso).replace("T", " ").replace(/([+-]\d{2}:?\d{2}|Z)$/, "").trim();
 }
 
 /* 早期记录没有保存回答原文时的兜底文案：只用已存的数值拼一句，不编造内容 */
