@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>成绩分析工作台</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <!-- 图标符号：全部内联，避免外部依赖 -->
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-spark" viewBox="0 0 24 24">
+      <path d="M12 3.2 13.9 9l5.9 1.9-5.9 1.9L12 18.6l-1.9-5.8L4.2 10.9 10.1 9 12 3.2Z" fill="currentColor" opacity=".92"/>
+      <path d="M18.4 15.3l.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9.9-2.3Z" fill="currentColor" opacity=".55"/>
+    </symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24">
+      <path d="M20 12a8 8 0 1 1-2.4-5.7M20 4.5V10h-5.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24">
+      <path d="M4.5 7h15M9.5 7V5.4A1.4 1.4 0 0 1 10.9 4h2.2a1.4 1.4 0 0 1 1.4 1.4V7m-8 0 .8 11.1A2 2 0 0 0 9.3 20h5.4a2 2 0 0 0 2-1.9L17.5 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24">
+      <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-send" viewBox="0 0 24 24">
+      <path d="M5 12.5 19.2 5.6a.6.6 0 0 1 .8.8L13.6 20c-.2.5-.9.5-1.1 0l-2.2-5.3L5 12.5Z" fill="currentColor"/>
+      <path d="M10.6 14.6 20 5.8" fill="none" stroke="#fff" stroke-width="1.4" stroke-linecap="round" opacity=".85"/>
+    </symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24">
+      <path d="M12 5v13m0 0 5.2-5.2M12 18l-5.2-5.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24">
+      <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24">
+      <path d="M4 7h16M4 12h16M4 17h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24">
+      <path d="M4 19V5m0 14h16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      <path d="M7.5 15.5l3.6-4.4 2.8 2.4 4.1-5.3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-book" viewBox="0 0 24 24">
+      <path d="M5 5.6A1.6 1.6 0 0 1 6.6 4H11v15.4H6.6A1.6 1.6 0 0 1 5 17.8V5.6Zm14 0A1.6 1.6 0 0 0 17.4 4H13v15.4h4.4a1.6 1.6 0 0 0 1.6-1.6V5.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 24 24">
+      <circle cx="11" cy="11" r="6.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M15.6 15.6 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </symbol>
+  </svg>
+
+  <!-- 背景层：渐变网格 + 光斑 + 粒子 + 颗粒 -->
+  <div class="stage" aria-hidden="true">
+    <div class="mesh"></div>
+    <div class="glow glow-a"></div>
+    <div class="glow glow-b"></div>
+    <div class="glow glow-c"></div>
+    <canvas id="bg-canvas"></canvas>
+    <div class="grid-lines"></div>
+    <div class="grain"></div>
+  </div>
+
+  <div class="app" id="app">
+    <!-- 左侧：品牌 + 会话 + 分析记录 -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-row">
+        <div class="mark"><svg><use href="#i-spark"/></svg></div>
+        <div class="brand-text">
+          <strong>成绩分析工作台</strong>
+          <span>Score Insight Studio</span>
+        </div>
+        <button class="icon-btn only-narrow" id="sidebar-close" type="button" title="收起侧栏">
+          <svg><use href="#i-chevron"/></svg>
+        </button>
+      </div>
+
+      <section class="session-card">
+        <div class="session-top">
+          <span class="eyebrow">本次会话</span>
+          <span class="live-pill"><i class="dot" id="status-dot"></i><span id="status-text">正在连接…</span></span>
+        </div>
+        <div class="session-grid">
+          <div class="session-cell">
+            <span>会话 ID</span>
+            <b id="session-id">—</b>
+          </div>
+          <div class="session-cell">
+            <span>已记录</span>
+            <b id="session-count">0 条分析</b>
+          </div>
+        </div>
+        <button class="btn btn-soft btn-block" id="reset-session" type="button">
+          <svg><use href="#i-plus"/></svg>开启新会话
+        </button>
+      </section>
+
+      <div class="list-head">
+        <span class="eyebrow" id="history-title">分析记录</span>
+        <span class="list-tools">
+          <button class="icon-btn" id="refresh-history" type="button" title="刷新记录">
+            <svg><use href="#i-refresh"/></svg>
+          </button>
+          <button class="icon-btn danger" id="clear-history" type="button" title="清空记录">
+            <svg><use href="#i-trash"/></svg>
+          </button>
+        </span>
+      </div>
+
+      <!-- 搜索：关键词 / 会话 ID / 时间，输入时自动识别类型 -->
+      <div class="search-box">
+        <svg class="search-icon"><use href="#i-search"/></svg>
+        <input
+          id="search-input"
+          type="search"
+          class="search-input"
+          placeholder="关键词 / 会话 ID / 日期"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="搜索分析记录"
+        />
+        <button class="search-clear" id="search-clear" type="button" title="清除搜索" hidden>×</button>
+      </div>
+      <p class="search-hint" id="search-hint">搜问题关键词；输入 8 位以上会话 ID 或 2026-10-30 这类日期会自动切换</p>
+
+      <div class="history" id="history">
+        <div class="skel-card"><span class="skel w70"></span><span class="skel w45"></span></div>
+        <div class="skel-card"><span class="skel w60"></span><span class="skel w40"></span></div>
+        <div class="skel-card"><span class="skel w75"></span><span class="skel w35"></span></div>
+      </div>
+
+      <p class="sidebar-foot">点开会话展开轮次 · 悬停 <b>×</b> 可删除单条记录</p>
+    </aside>
+
+    <!-- 中间：对话工作区 -->
+    <main class="workspace">
+      <header class="ws-head">
+        <div class="ws-title">
+          <button class="icon-btn only-narrow" id="sidebar-open" type="button" title="打开侧栏">
+            <svg><use href="#i-menu"/></svg>
+          </button>
+          <div>
+            <h1>学习与成绩分析助手</h1>
+            <p>最小二乘趋势拟合 · 本地资料检索 · 连续追问</p>
+          </div>
+        </div>
+        <div class="ws-actions">
+          <button class="btn btn-ghost btn-sm" id="scroll-bottom" type="button" hidden>
+            <svg><use href="#i-arrow-down"/></svg>回到最新
+          </button>
+          <span class="pill">
+            <svg class="pill-icon"><use href="#i-chart"/></svg>
+            本地运行
+          </span>
+        </div>
+      </header>
+
+      <div class="messages" id="messages">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-badge"><svg><use href="#i-spark"/></svg>AI 学习分析 · 结构化校验</div>
+          <h2>把你的成绩发给我</h2>
+          <p>例如：「这是我最近四次考试的成绩：78、82、85、88，帮我看看变化趋势」。我会先做最小二乘拟合，再结合本地资料解释结果。</p>
+          <div class="examples">
+            <button class="chip" data-text="这是我最近四次考试的成绩：78、82、85、88，帮我看看变化趋势。">四次成绩看趋势</button>
+            <button class="chip" data-text="继续按这个趋势，第五次可能是多少？">预测第五次</button>
+            <button class="chip" data-text="是不是因为我增加了学习时间，成绩才提高？">问因果</button>
+            <button class="chip" data-text="如何提高复习效率？">查学习方法</button>
+            <button class="chip" data-text="我这次考了八十五分，能帮我分析吗？">输入错误数据（异常演示）</button>
+          </div>
+          <div class="empty-foot">支持 0—150 分 · 至少 2 次成绩 · 结果含限制条件</div>
+        </div>
+      </div>
+
+      <form class="composer" id="composer">
+        <div class="composer-box">
+          <textarea id="input" rows="2" placeholder="输入问题或成绩，例如：78、82、85、88，第五次大概多少分？" maxlength="2000"></textarea>
+          <button type="submit" id="send" class="send-btn" title="发送">
+            <svg><use href="#i-send"/></svg>
+            <span>发送</span>
+          </button>
+        </div>
+        <div class="composer-foot">
+          <span class="hint">Enter 发送 · Shift + Enter 换行</span>
+          <span class="hint hint-soft">数据仅存本地 SQLite</span>
+        </div>
+      </form>
+    </main>
+
+    <!-- 右侧：数据看板 -->
+    <aside class="insights" aria-label="数据看板">
+      <div class="insight-head">
+        <div>
+          <span class="eyebrow">Overview</span>
+          <h2>数据看板</h2>
+        </div>
+        <span class="pill pill-quiet" id="insight-updated">—</span>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi reveal" data-reveal>
+          <span class="kpi-label">会话总数</span>
+          <strong class="kpi-value" id="kpi-sessions">0</strong>
+          <span class="kpi-foot">本地累计</span>
+        </div>
+        <div class="kpi reveal" data-reveal style="transition-delay:40ms">
+          <span class="kpi-label">问答轮次</span>
+          <strong class="kpi-value" id="kpi-turns">0</strong>
+          <span class="kpi-foot">含多轮追问</span>
+        </div>
+        <div class="kpi reveal" data-reveal style="transition-delay:80ms">
+          <span class="kpi-label">平均斜率</span>
+          <strong class="kpi-value" id="kpi-slope">—</strong>
+          <span class="kpi-foot" id="kpi-slope-foot">分 / 次</span>
+        </div>
+        <div class="kpi reveal" data-reveal style="transition-delay:120ms">
+          <span class="kpi-label">最近预测</span>
+          <strong class="kpi-value" id="kpi-prediction">—</strong>
+          <span class="kpi-foot" id="kpi-prediction-foot">暂无预测</span>
+        </div>
+      </div>
+
+      <section class="panel reveal" data-reveal>
+        <div class="panel-head">
+          <h3>记录构成</h3>
+          <span class="panel-sub" id="dist-total">0 条</span>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label">趋势分析</span>
+          <div class="bar-track"><i class="bar-fill trend" id="bar-trend"></i></div>
+          <span class="bar-val" id="val-trend">0</span>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label">资料检索</span>
+          <div class="bar-track"><i class="bar-fill retrieval" id="bar-retrieval"></i></div>
+          <span class="bar-val" id="val-retrieval">0</span>
+        </div>
+      </section>
+
+      <section class="panel reveal" data-reveal>
+        <div class="panel-head">
+          <h3>最近斜率走势</h3>
+          <span class="panel-sub" id="spark-caption">最近 0 条</span>
+        </div>
+        <div class="spark-wrap">
+          <svg id="sparkline" viewBox="0 0 268 92" preserveAspectRatio="none" role="img" aria-label="最近趋势记录的斜率走势"></svg>
+          <div class="spark-empty" id="spark-empty">还没有趋势记录，先问一句试试</div>
+        </div>
+        <div class="spark-meta">
+          <span>单位：分 / 次</span>
+          <span>按记录时间排序</span>
+        </div>
+      </section>
+
+      <section class="panel panel-tip reveal" data-reveal>
+        <div class="tip-head"><svg><use href="#i-book"/></svg>使用提示</div>
+        <p>同一会话里直接问「第五次呢」，系统会复用上一轮成绩，不必重复输入。</p>
+        <p class="muted">资料库未覆盖的问题会明确回答「资料不足」，不会编造来源。</p>
+      </section>
+    </aside>
+  </div>
+
+  <script type="module" src="/static/bg.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
