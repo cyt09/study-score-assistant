@@ -727,6 +727,10 @@ function buildSessionNode(session, expanded) {
       : `斜率 ${formatNum(session.slope)}`;
   meta.textContent = `${shortTime(session.updated_at)} · ${badge} · ${tail}`;
 
+  // 操作行：完整记录 / 继续追问 / 删除三个按钮同一行，固定排在日期下方
+  const actions = document.createElement("div");
+  actions.className = "session-actions";
+
   // 查看完整聊天记录：像聊天一样回放该会话全部轮次，不切换当前会话
   const transcript = document.createElement("button");
   transcript.type = "button";
@@ -737,7 +741,6 @@ function buildSessionNode(session, expanded) {
     event.stopPropagation();
     showSessionTranscript(session);
   });
-  meta.appendChild(transcript);
 
   // 点开历史会话继续多轮问答（不重新输数据，追问直接复用该会话的上下文）
   const resume = document.createElement("button");
@@ -749,7 +752,6 @@ function buildSessionNode(session, expanded) {
     event.stopPropagation();
     resumeSession(session.session_id);
   });
-  meta.appendChild(resume);
 
   // 删除整个会话：连同该会话的全部轮次一起删掉
   const delSession = document.createElement("button");
@@ -762,9 +764,9 @@ function buildSessionNode(session, expanded) {
     event.stopPropagation();
     deleteSession(session);
   });
-  meta.appendChild(delSession);
 
-  head.append(q, meta);
+  actions.append(transcript, resume, delSession);
+  head.append(q, meta, actions);
 
   const turnList = document.createElement("ul");
   turnList.className = "turn-list";

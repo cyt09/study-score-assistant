@@ -535,39 +535,46 @@ body {
 }
 .history-item.session.open .session-head .q::after { transform: rotate(90deg); color: var(--brand); }
 
+/* 操作行：完整记录 / 继续追问 / 删除固定排在日期下方同一行 */
+.session-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+}
+
 .session-resume {
-  margin-left: auto;
-  padding: 2px 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
   border: none;
   border-radius: 999px;
   background: rgba(53, 99, 233, 0.08);
   color: var(--brand);
   font-family: inherit;
   font-size: 9.5px;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.18s ease, transform 0.18s var(--spring);
 }
 .session-resume:hover { background: rgba(53, 99, 233, 0.16); transform: translateY(-1px); }
 
-/* 会话卡片上的"删除整个会话"：平时隐藏，悬停卡片才出现，避免误触 */
+/* 会话卡片上的"删除整个会话"：与上面两个按钮同高同行，图标弱化、悬停变红 */
 .session-del {
   flex: none;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
   padding: 0;
   border: none;
-  border-radius: 6px;
-  background: none;
-  color: #b6c2d4;
+  border-radius: 999px;
+  background: rgba(53, 99, 233, 0.08);
+  color: #8fa0bb;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s var(--spring);
+  transition: background 0.18s ease, color 0.18s ease, transform 0.18s var(--spring);
 }
 .session-del svg { width: 12.5px; height: 12.5px; }
-.history-item:hover .session-del,
-.session-del:focus-visible { opacity: 1; }
 .session-del:hover { background: #fdeaea; color: var(--danger); transform: scale(1.08); }
 .session-del:focus-visible { outline: none; box-shadow: var(--ring); }
 
