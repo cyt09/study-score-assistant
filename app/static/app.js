@@ -727,6 +727,18 @@ function buildSessionNode(session, expanded) {
       : `斜率 ${formatNum(session.slope)}`;
   meta.textContent = `${shortTime(session.updated_at)} · ${badge} · ${tail}`;
 
+  // 查看完整聊天记录：像聊天一样回放该会话全部轮次，不切换当前会话
+  const transcript = document.createElement("button");
+  transcript.type = "button";
+  transcript.className = "session-resume";
+  transcript.textContent = "完整记录";
+  transcript.title = "查看这个会话的完整聊天记录";
+  transcript.addEventListener("click", (event) => {
+    event.stopPropagation();
+    showSessionTranscript(session);
+  });
+  meta.appendChild(transcript);
+
   // 点开历史会话继续多轮问答（不重新输数据，追问直接复用该会话的上下文）
   const resume = document.createElement("button");
   resume.type = "button";
@@ -856,13 +868,16 @@ async function resumeSession(sessionId) {
   }
 }
 
-/* 把一条历史记录渲染成"提问 + 回答卡"，结构与实时回答保持一致 */
-function renderStoredTurn(turn) {
+/* 把一条历史记录渲染成"提问 + 回答卡"，结构与实时回答保持一致；
+   传入 container 时渲染进指定容器（完整聊天记录弹窗），否则渲染进聊天区 */
+function renderStoredTurn(turn, container) {
+  const target = container || el.messages;
+
   const userWrapper = document.createElement("div");
   userWrapper.className = "msg user";
   userWrapper.innerHTML = '<div class="avatar"></div><div class="bubble"></div>';
   userWrapper.querySelector(".bubble").textContent = turn.question;
-  el.messages.appendChild(userWrapper);
+  target.appendChild(userWrapper);
 
   const card = document.createElement("div");
   card.className = "answer-card";
@@ -906,7 +921,87 @@ function renderStoredTurn(turn) {
   wrapper.className = "msg";
   wrapper.innerHTML = '<div class="avatar"></div>';
   wrapper.appendChild(card);
-  el.messages.appendChild(wrapper);
+  target.appendChild(wrapper);
+  if (!container) scrollToBottom();
+}
+
+/* 会话完整聊天记录弹窗：按时间顺序回放该会话的全部问答，不切换当前会话 */
+async function showSessionTranscript(session) {
+  document.querySelector(".transcript-dialog")?.remove();
+
+  const dialog = document.createElement("dialog");
+  dialog.className = "record-dialog transcript-dialog";
+
+  const head = document.createElement("div");
+  head.className = "dialog-head";
+  const headText = document.createElement("div");
+  const kicker = document.createElement("div");
+  kicker.className = "dialog-kicker";
+  kicker.textContent = "Session Transcript";
+  const title = document.createElement("h3");
+  title.className = "dialog-title";
+  title.textContent = "完整聊天记录";
+  headText.append(kicker, title);
+  head.appendChild(headText);
+
+  const tag = document.createElement("span");
+  tag.className = "turn-tag";
+  tag.textContent = `${session.turn_count} 轮`;
+  head.appendChild(tag);
+
+  const body = document.createElement("div");
+  body.className = "dialog-body transcript-body";
+  body.innerHTML = '<p class="muted small">正在加载会话记录…</p>';
+  dialog.append(head, body);
+
+  const foot = document.createElement("div");
+  foot.className = "dialog-foot";
+  const resume = document.createElement("button");
+  resume.type = "button";
+  resume.className = "dialog-resume";
+  resume.textContent = "在聊天区继续追问";
+  resume.title = "切换到这个会话，接着问";
+  resume.addEventListener("click", () => {
+    dialog.close();
+    resumeSession(session.session_id);
+  });
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "dialog-close";
+  close.textContent = "关闭";
+  close.addEventListener("click", () => dialog.close());
+  foot.append(resume, close);
+  dialog.appendChild(foot);
+
+  document.body.appendChild(dialog);
+  dialog.showModal();
+  dialog.addEventListener("close", () => dialog.remove());
+
+  try {
+    const response = await fetch(`/api/session/${session.session_id}`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+
+    body.innerHTML = "";
+    const turns = data.turns || [];
+    if (!turns.length) {
+      body.innerHTML = '<p class="muted small">这个会话没有可查看的记录</p>';
+      return;
+    }
+
+    const note = document.createElement("p");
+    note.className = "tr-note";
+    note.textContent = `会话 ${String(data.session_id || session.session_id).slice(0, 8)} · 共 ${turns.length} 轮，按提问时间正序回放`;
+    body.appendChild(note);
+
+    turns.forEach((turn) => renderStoredTurn(turn, body));
+  } catch (error) {
+    body.innerHTML = "";
+    const box = document.createElement("p");
+    box.className = "muted small";
+    box.textContent = `加载失败：${error.message || "请稍后重试"}`;
+    body.appendChild(box);
+  }
 }
 
 /* 需要用户补充/修正时的可操作卡片：预填原数据、标红错误项、给一键选项 */
