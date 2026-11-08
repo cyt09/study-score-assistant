@@ -107,9 +107,6 @@ python scripts/run_validation.py --base http://127.0.0.1:8000
 知识库未覆盖 / 调用失败）的真实运行记录见 `docs/验证记录.md`，对应的脱敏运行日志
 （自动过滤密钥，见 `app/runlog.py`）随仓库提交于 `logs/validation_*.jsonl`。
 
-真实运行演示视频见 `docs/运行演示.mp4`（约 1.5 分钟：正常趋势分析与预测、知识检索命中/
-未覆盖、无效数据被工具拒绝并给出修正卡片、查看分析记录详情）。
-
 ## 目录结构
 
 ```
@@ -128,7 +125,7 @@ app/
 knowledge/       检索用学习资料（4 篇，获取说明见 knowledge/README.md）
 scripts/         verify_calc.py 数值验证 / run_validation.py 场景验证
 tests/           44 项单元与流程测试
-docs/            验证记录、AI 使用说明、录制指南、提交清单
+docs/            验证记录、AI 使用说明、改进说明、检索评估
 ```
 
 ## 已知限制
