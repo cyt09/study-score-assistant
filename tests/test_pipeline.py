@@ -308,12 +308,10 @@ class AgentFlowTest(unittest.TestCase):
         records = db.list_session_records(session_id)
         self.assertEqual(len(records), 1)
 
-        # 模拟服务重启：内存里的会话被清空，只剩数据库
+        # 模拟服务重启：内存里的会话被清空，只剩数据库。
+        # 现在不需要手工 restore：get_or_create 未命中时会自动从库里回填（否则追问就失忆）。
         store.reset(session_id)
         restored = store.get_or_create(session_id)
-        self.assertIsNone(restored.last_dataset)
-        restored.restore_from_records(records)
-
         self.assertIsNotNone(restored.last_dataset)
         self.assertEqual(restored.last_dataset["y"], [78, 82, 85, 88])
         self.assertEqual(len(restored.messages), 2)

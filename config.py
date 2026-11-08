@@ -38,6 +38,9 @@ class Settings:
     model: str = os.getenv("LLM_MODEL", "deepseek-chat").strip()
     timeout: float = _env_float("LLM_TIMEOUT", 60.0)
     max_tool_rounds: int = _env_int("MAX_TOOL_ROUNDS", 4)
+    # 瞬时故障（429/超时/连接失败）自动重试次数与退避基数
+    llm_max_retries: int = _env_int("LLM_MAX_RETRIES", 2)
+    llm_retry_backoff: float = _env_float("LLM_RETRY_BACKOFF", 0.8)
 
     # --- 演示模式：没有 API Key 时可用固定桩模型跑通交互 ---
     mock: bool = os.getenv("LLM_MOCK", "0").strip() == "1"
@@ -47,6 +50,8 @@ class Settings:
     chart_dir: Path = BASE_DIR / os.getenv("CHART_DIR", "data/charts")
     knowledge_dir: Path = BASE_DIR / os.getenv("KNOWLEDGE_DIR", "knowledge")
     log_dir: Path = BASE_DIR / "logs"
+    # 单个运行日志超过该大小就改名归档，避免 run.jsonl 无限增长
+    log_max_bytes: int = _env_int("LOG_MAX_BYTES", 8 * 1024 * 1024)
 
     # --- 检索 ---
     retrieval_top_k: int = _env_int("RETRIEVAL_TOP_K", 3)

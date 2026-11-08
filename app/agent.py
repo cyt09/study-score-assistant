@@ -11,7 +11,7 @@ import json
 import math
 import re
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import ValidationError
 
@@ -33,6 +33,7 @@ SYSTEM_PROMPT = """你是"学习与成绩分析助手"，帮助学生分析考�
 4. 工具返回错误（数据不足、非数字、序号重复、无法拟合）时：trend 必须填"无法判断"，slope/intercept/prediction 必须为 null，answer 只说明原因和用户该怎么改，不得给出任何趋势判断或预测分数，也不要在同一轮里重复调用工具试图绕过错误。
 5. 预测位置只能来自用户原话。用户没说第几次（例如只说"帮我预测成绩""按这个趋势预测一下"）时：调用 analyze_score_trend 不要传 predict_x，回答只讲趋势、拟合质量与限制条件，并用 need_followup 询问想预测第几次；此时回答里不得出现任何具体预测分数，也不允许把"下一次"当默认位置。用户明确说了第几次（含"下次/下一次"）时，才传 predict_x，并原样使用工具返回的 prediction。
 6. 会话已经保存了用户上一次提供的数据，用户追问"第五次呢"时直接复用，不要重复索要成绩。
+7. 工具返回 prediction_interval 时，answer 里除了点估计还要给出区间，例如"第 5 次约 91.5 分，95% 预测区间 88.9—94.1 分"；不允许只给一个精确分数，也不允许改动区间上下限。
 
 输出格式（只输出一个 JSON 对象，不要加 Markdown 代码块、不要加解释文字）：
 {
@@ -591,6 +592,70 @@ def _error_answer(last_tool_error: dict[str, Any]) -> FinalAnswer:
     )
 
 
+# 工具 warnings 里有些是写给模型的指令（不是给用户看的限制条件），合并时要跳过
+_WARNING_AS_INSTRUCTION = ("结论中应", "用户未指定")
+# 同一主题不必重复罗列：模型已经说过"外推有风险"，就不再把工具的同类告警追加一遍
+_LIMITATION_TOPICS = ("外推", "预测区间", "R²", "样本", "相关", "因果", "无法拟合")
+
+
+def _already_covered(warning: str, limitations: list[str]) -> bool:
+    if any(warning[:12] in item or item[:12] in warning for item in limitations):
+        return True
+    topics = [topic for topic in _LIMITATION_TOPICS if topic in warning]
+    return bool(topics) and all(any(topic in item for item in limitations) for topic in topics)
+
+
+def _merge_tool_warnings(answer: FinalAnswer, trend: dict[str, Any]) -> FinalAnswer:
+    """把工具算出来的 warnings 强制并入限制条件。
+
+    模型的 limitations 只被校验"至少一条非空"，它可以只写一句"样本较小"糊弄过去；
+    而样本量、R²、外推、预测区间这些是工具实打实算出来的，必须原样呈现给用户。
+    所以这里由程序追加，模型只能加、不能减。
+    """
+    warnings = [
+        str(item).strip()
+        for item in (trend.get("warnings") or [])
+        if item and not any(mark in str(item) for mark in _WARNING_AS_INSTRUCTION)
+    ]
+    if not warnings:
+        return answer
+
+    merged = list(answer.limitations)
+    for warning in warnings:
+        if _already_covered(warning, merged):
+            continue
+        merged.append(warning)
+    if merged == list(answer.limitations):
+        return answer
+    return answer.model_copy(update={"limitations": merged})
+
+
+# 出现这些词说明用户不只要一个数字，还想要"怎么办" —— 必须有资料依据
+_ADVICE_HINTS = (
+    "提高", "提升", "怎么", "如何", "建议", "方法", "效率", "复习", "原因",
+    "为什么", "技巧", "计划", "波动", "稳定", "偏科", "改善", "保持", "补救",
+)
+
+
+def _wants_advice(text: str) -> bool:
+    return any(hint in (text or "") for hint in _ADVICE_HINTS)
+
+
+def _retrieval_note(result: dict[str, Any]) -> str:
+    """程序补检索后给模型看的说明。"""
+    hits = result.get("hits") or []
+    if not hits:
+        return (
+            "【程序补充检索】本轮你还未检索资料。程序已代为检索，结果为：知识库没有相关片段。"
+            "请在回答中明确说明资料不足，不要编造引用。"
+        )
+    lines = "\n".join(f"- {hit['title']} {hit['chunk_id']}：{hit['snippet'][:80]}" for hit in hits)
+    return (
+        "【程序补充检索】本轮你直接作答但还没检索资料，程序已代为检索并命中以下片段。"
+        "请在 sources 中如实引用（标题、chunk_id、原文片段），并结合它们给出可执行建议：\n" + lines
+    )
+
+
 def _extract_json(text: str) -> str:
     """模型偶尔会加代码围栏或前后缀，这里做最小限度的容错提取。"""
     stripped = text.strip()
@@ -714,7 +779,32 @@ def _save_failure_record(
         logger.log("db", "save_failure_failed", {"message": str(exc)})
 
 
-def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> ChatResponse:
+def handle_message(user_text: str, session, source: str = db.SOURCE_WEB,
+                   progress: Callable[[str, dict], None] | None = None) -> ChatResponse:
+    """对外入口：同一会话串行执行。
+
+    前端虽然禁用了发送按钮，但多标签页、脚本或重放请求仍可能并发打进来；
+    两条消息同时改写 session.messages 会让上下文交错，模型看到重复或错序的对话。
+    """
+    lock = getattr(session, "lock", None)
+    if lock is None:  # 兼容测试里的轻量会话对象
+        return _run_message(user_text, session, source=source, progress=progress)
+    with lock:
+        return _run_message(user_text, session, source=source, progress=progress)
+
+
+def _emit(progress: Callable[[str, dict], None] | None, phase: str, payload: dict | None = None) -> None:
+    """向调用方推送进度事件；进度推送失败绝不能影响主流程。"""
+    if progress is None:
+        return
+    try:
+        progress(phase, payload or {})
+    except Exception:  # pragma: no cover - 前端断开连接等情况
+        pass
+
+
+def _run_message(user_text: str, session, source: str = db.SOURCE_WEB,
+                 progress: Callable[[str, dict], None] | None = None) -> ChatResponse:
     run_id = uuid.uuid4().hex[:12]
     logger = RunLogger(run_id)
     logger.log("start", "user_message",
@@ -729,6 +819,7 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
             session_id=session.session_id,
             error=exc.message,
             error_detail=exc.detail,
+            error_code=exc.code,
             run_id=run_id,
         )
 
@@ -752,9 +843,12 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
     chart_url: str | None = None
     final_text = ""
     messages = list(base_messages)
+    # 程序补检索只做一次，避免陷入"补检索 → 模型还不引用 → 再补"的循环
+    retrieval_guard_used = False
 
     try:
         for round_index in range(settings.max_tool_rounds):
+            _emit(progress, "thinking", {"round": round_index + 1, "max_rounds": settings.max_tool_rounds})
             context = {"role": "system", "content": session.context_note()}
             response = client.chat([messages[0], context, *messages[1:]], tools=TOOLS)
             logger.log(
@@ -763,6 +857,7 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
                 {
                     "model": response.get("model"),
                     "usage": response.get("usage"),
+                    "retries": response.get("retries"),
                     "tool_calls": response.get("tool_calls"),
                     "content": response.get("content"),
                 },
@@ -776,6 +871,38 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
                     messages.append({"role": "assistant", "content": response.get("content") or ""})
                     messages.append({"role": "system", "content": GUARD_PROMPT})
                     continue
+
+                # 护栏：已经有拟合结果、用户又在问"怎么提高"，但模型准备直接给建议。
+                # 这种建议最容易变成"多刷题、多总结"的空话，程序补一次检索再让它重答。
+                if (
+                    not retrieval_guard_used
+                    and last_trend is not None
+                    and _wants_advice(user_text)
+                    and not any(t.name == "search_study_knowledge" for t in tool_records)
+                    and round_index + 1 < settings.max_tool_rounds
+                ):
+                    retrieval_guard_used = True
+                    _emit(progress, "tool", {"name": "search_study_knowledge", "by": "program"})
+                    result, summary = _execute_tool("search_study_knowledge", {"query": user_text})
+                    logger.log(
+                        "guard",
+                        "supplement_retrieval",
+                        {"query": user_text, "hits": len(result.get("hits") or []), "ok": result.get("ok")},
+                    )
+                    tool_records.append(
+                        ToolCallRecord(
+                            name="search_study_knowledge",
+                            arguments={"query": user_text, "by": "program"},
+                            ok=bool(result.get("ok")),
+                            summary=f"程序补充检索：{summary}",
+                        )
+                    )
+                    last_retrieval = {"result": result, "arguments": {"query": user_text}}
+                    messages.append({"role": "assistant", "content": response.get("content") or ""})
+                    messages.append({"role": "system", "content": _retrieval_note(result)})
+                    _emit(progress, "tool_done", {"name": "search_study_knowledge", "ok": bool(result.get("ok"))})
+                    continue
+
                 final_text = response.get("content", "")
                 break
 
@@ -799,6 +926,8 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
                 except json.JSONDecodeError:
                     arguments = {}
                     logger.log("tool", "bad_arguments", {"name": name, "raw": raw_args})
+
+                _emit(progress, "tool", {"name": name})
 
                 # 本轮已经判定输入无效：不再允许重新拟合。
                 # 否则模型可能"少传一个坏值"再算一次，等于替用户删掉数据后给出趋势。
@@ -826,6 +955,7 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
                         }
                     )
                     round_notes.append("【程序校验】输入数据尚未修正，本轮不要再调用 analyze_score_trend。")
+                    _emit(progress, "tool_done", {"name": name, "ok": False})
                     continue
 
                 # 用户原话里的成绩有空缺（缺考/写成文字）：不拿残缺数据拟合，
@@ -850,6 +980,7 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
                         }
                     )
                     round_notes.append(_failed_tool_note(result))
+                    _emit(progress, "tool_done", {"name": name, "ok": False})
                     continue
 
                 # 用户原话里有越界的成绩（负数、超过满分）：按 INVALID_SCORE 拒绝，
@@ -874,6 +1005,7 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
                         }
                     )
                     round_notes.append(_failed_tool_note(result))
+                    _emit(progress, "tool_done", {"name": name, "ok": False})
                     continue
 
                 # 预测位置：用户说了就按用户说的，没说就不允许模型自己猜"下一次"
@@ -896,6 +1028,7 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
                 tool_records.append(
                     ToolCallRecord(name=name, arguments=arguments, ok=bool(result.get("ok")), summary=summary)
                 )
+                _emit(progress, "tool_done", {"name": name, "ok": bool(result.get("ok"))})
                 if name == "analyze_score_trend" and result.get("ok"):
                     last_trend = result
                     chart_url = result.get("chart_url")
@@ -925,7 +1058,11 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
             for note in round_notes:
                 messages.append({"role": "system", "content": note})
         else:
-            raise LLMError("工具调用轮次超限", f"连续 {settings.max_tool_rounds} 轮仍在调用工具，已终止以避免死循环")
+            raise LLMError(
+                "工具调用轮次超限",
+                f"连续 {settings.max_tool_rounds} 轮仍在调用工具，已终止以避免死循环",
+                code="ROUNDS",
+            )
     except LLMError as exc:
         logger.log("error", "llm_error", {"message": exc.message, "detail": exc.detail})
         _save_failure_record(
@@ -939,6 +1076,7 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
             chart_url=chart_url,
             error=exc.message,
             error_detail=f"{exc.detail}（run_id={run_id}，可在 logs/run.jsonl 中检索该编号排查）",
+            error_code=exc.code,
             run_id=run_id,
         )
 
@@ -953,6 +1091,7 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
             chart_url=chart_url,
             error="模型没有返回最终回答",
             error_detail=f"run_id={run_id}",
+            error_code="EMPTY",
             run_id=run_id,
         )
 
@@ -968,6 +1107,7 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
             {"role": "user", "content": REPAIR_PROMPT.format(errors="\n".join(f"- {e}" for e in errors))},
         ]
         try:
+            _emit(progress, "repair", {})
             repaired = client.chat(repair_messages, tools=None, temperature=0.0, json_mode=True)
             raw_repaired = repaired.get("content", "")
             logger.log("validate", "repair_attempt", {"raw": raw_repaired})
@@ -985,6 +1125,17 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
         answer = _error_answer(last_tool_error)
         errors = []
 
+    # 结构化校验通过后，再把工具算出来的限制条件强制并入 —— 这一步不依赖模型自觉
+    if answer is not None and last_trend:
+        before = len(answer.limitations)
+        answer = _merge_tool_warnings(answer, last_trend)
+        if len(answer.limitations) != before:
+            logger.log(
+                "guard",
+                "limitations_merged",
+                {"added": answer.limitations[before:], "warnings": last_trend.get("warnings")},
+            )
+
     if answer is None:
         logger.log("validate", "failed", {"errors": errors, "raw": final_text})
         _save_failure_record(
@@ -998,6 +1149,7 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
             chart_url=chart_url,
             error="模型输出未通过结构化校验",
             error_detail="；".join(errors[:4]) + f"（原始输出已写入日志，run_id={run_id}）",
+            error_code="SCHEMA",
             run_id=run_id,
         )
 
@@ -1042,6 +1194,7 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
         reply=answer,
         tool_calls=tool_records,
         chart_url=chart_url,
+        prediction_interval=(last_trend or {}).get("prediction_interval"),
         fix=_build_fix(last_tool_error, last_trend),
         run_id=run_id,
     )

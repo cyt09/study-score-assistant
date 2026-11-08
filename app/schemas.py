@@ -80,9 +80,13 @@ class ChatResponse(BaseModel):
     reply: FinalAnswer | None = None
     tool_calls: list[ToolCallRecord] = Field(default_factory=list)
     chart_url: str | None = None
+    # 预测区间由工具计算、程序直接下发，不经过模型转述，避免被写错或省略
+    prediction_interval: dict | None = None
     # 需要用户补充/修正时下发的可操作卡片：前端据此渲染输入框和快捷选项，
     # 而不是只让用户自己看文字说明后重新打字。
     fix: dict | None = None
     error: str | None = None
     error_detail: str | None = None
+    # 失败分类（AUTH/TIMEOUT/RATE_LIMIT/...），前端据此选择展示样式，也便于统计
+    error_code: str | None = None
     run_id: str | None = None

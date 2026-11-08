@@ -27,6 +27,16 @@ _CJK_FONT_READY: bool | None = None
 # 成绩有效上限：同时覆盖百分制（100）与 150 分制（如高考语数外），负数一律无效
 _MAX_SCORE = 150.0
 
+# t 分布双侧 95% 临界值（自由度 1—30），自由度再大就收敛到 1.96。
+# 不引入 scipy：常用的几个值查表即可，也便于逐行核对。
+_T975 = {
+    1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365, 8: 2.306,
+    9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179, 13: 2.160, 14: 2.145, 15: 2.131,
+    16: 2.120, 17: 2.110, 18: 2.101, 19: 2.093, 20: 2.086, 21: 2.080, 22: 2.074,
+    23: 2.069, 24: 2.064, 25: 2.060, 26: 2.056, 27: 2.052, 28: 2.048, 29: 2.045,
+    30: 2.042,
+}
+
 
 class TrendError(Exception):
     """工具可预期的失败：带上错误码、给用户看的说明，以及"改哪里"的结构化细节。
@@ -208,7 +218,8 @@ def _validate_pair(x: list[float], y: list[float], predict_x: float | None) -> f
 
 
 def _render_chart(xs: list[float], ys: list[float], slope: float, intercept: float,
-                  predict_x: float | None, prediction: float | None) -> str:
+                  predict_x: float | None, prediction: float | None,
+                  interval: dict[str, Any] | None = None) -> str:
     chinese = _setup_chinese_font()
     fig, ax = plt.subplots(figsize=(6.4, 4.0), dpi=140)
 
@@ -227,6 +238,18 @@ def _render_chart(xs: list[float], ys: list[float], slope: float, intercept: flo
                 linestyle=":", color="#eb5757", linewidth=1)
         ax.annotate(f"{prediction:.1f}", (predict_x, prediction), textcoords="offset points",
                     xytext=(6, 8), color="#eb5757", fontsize=10)
+        # 把 95% 预测区间画成误差棒：让人一眼看出这是"一个范围"，不是一个确定分数
+        if interval:
+            ax.errorbar(
+                [predict_x], [prediction],
+                yerr=[[prediction - interval["low"]], [interval["high"] - prediction]],
+                fmt="none", ecolor="#eb5757", elinewidth=1.2, capsize=6, alpha=0.7, zorder=4,
+            )
+            ax.annotate(
+                f"95%: {interval['low']:g}—{interval['high']:g}",
+                (predict_x, min(prediction, interval["low"])), textcoords="offset points",
+                xytext=(6, -14), color="#eb5757", fontsize=8,
+            )
 
     for xi, yi in zip(xs, ys):
         ax.annotate(f"{yi:g}", (xi, yi), textcoords="offset points", xytext=(0, -14),
@@ -234,7 +257,9 @@ def _render_chart(xs: list[float], ys: list[float], slope: float, intercept: flo
 
     if predict_x is not None and prediction is not None:
         ax.set_xlim(min(xs) - 0.5, max(max(xs), predict_x) + 0.5)
-        ax.set_ylim(min(min(ys), prediction) - 5, max(max(ys), prediction) + 5)
+        low = min(min(ys), prediction - (interval["margin"] if interval else 0))
+        high = max(max(ys), prediction + (interval["margin"] if interval else 0))
+        ax.set_ylim(low - 5, high + 5)
 
     ax.set_xlabel("考试序号" if chinese else "Exam index")
     ax.set_ylabel("成绩" if chinese else "Score")
@@ -287,6 +312,24 @@ def analyze_trend(x: Any, y: Any, predict_x: float | None = None) -> dict:
     if predict_value is not None:
         prediction = round(slope * predict_value + intercept, 2)
 
+    # ---- 预测区间：残差标准误 + t 临界值（自由度 n-2）----
+    # 只给一个点估计会让人误以为"第五次就是 85.37"，把不确定性一并算出来更诚实。
+    # 公式：ŷ ± t(0.975, n-2) · s · sqrt(1 + 1/n + (x0-x̄)²/Sxx)
+    interval: dict[str, Any] | None = None
+    if predict_value is not None and n >= 3 and ss_tot >= 0:
+        dof = n - 2
+        residual_se = math.sqrt(ss_res / dof)
+        t_crit = _T975.get(dof, 1.96)
+        margin = t_crit * residual_se * math.sqrt(1 + 1 / n + (predict_value - x_mean) ** 2 / sxx)
+        interval = {
+            "level": 0.95,
+            "dof": dof,
+            "residual_se": round(residual_se, 3),
+            "low": round(prediction - margin, 2),
+            "high": round(prediction + margin, 2),
+            "margin": round(margin, 2),
+        }
+
     warnings: list[str] = []
     if n < 3:
         warnings.append("样本只有 2 个点，任意两点都能连成直线，拟合优度不具参考意义")
@@ -302,8 +345,13 @@ def analyze_trend(x: Any, y: Any, predict_x: float | None = None) -> dict:
         warnings.append("用户未指定预测位置，结论中应说明并询问要预测第几次")
     if all(value == ys[0] for value in ys):
         warnings.append("所有成绩完全相同，趋势线为水平线，预测值等于原成绩")
+    if interval and interval["margin"] >= 3:
+        warnings.append(
+            f"95% 预测区间约 {interval['low']:g}—{interval['high']:g} 分（±{interval['margin']:g}），"
+            "单次考试的实际成绩可能落在该范围内"
+        )
 
-    chart_url = _render_chart(xs, ys, slope, intercept, predict_value, prediction)
+    chart_url = _render_chart(xs, ys, slope, intercept, predict_value, prediction, interval)
 
     return {
         "ok": True,
@@ -316,6 +364,7 @@ def analyze_trend(x: Any, y: Any, predict_x: float | None = None) -> dict:
         "r2": round(r2, 4),
         "predict_x": predict_value,
         "prediction": prediction,
+        "prediction_interval": interval,
         "fitted_y": [round(float(v), 4) for v in fitted],
         "chart_url": chart_url,
         "warnings": warnings,

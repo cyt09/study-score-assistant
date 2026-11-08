@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS analyses (
     slope        REAL,
     intercept    REAL,
     prediction   REAL,
+    pred_low     REAL,
+    pred_high    REAL,
     r2           REAL,
     chart_url    TEXT,
     created_at   TEXT    NOT NULL,
@@ -35,6 +37,8 @@ CREATE TABLE IF NOT EXISTS analyses (
     mode         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_analyses_created ON analyses(created_at DESC);
+-- 按会话取全部轮次、删整个会话、算"第几轮"都靠 session_id，没索引就是全表扫
+CREATE INDEX IF NOT EXISTS idx_analyses_session ON analyses(session_id, id);
 """
 
 # 来源标记：web = 真人在页面上提问；validation = scripts/run_validation.py 生成的验证证据。
@@ -60,6 +64,8 @@ def init_db() -> None:
             "answer_text": "ALTER TABLE analyses ADD COLUMN answer_text TEXT",
             "sources_json": "ALTER TABLE analyses ADD COLUMN sources_json TEXT",
             "mode": "ALTER TABLE analyses ADD COLUMN mode TEXT",
+            "pred_low": "ALTER TABLE analyses ADD COLUMN pred_low REAL",
+            "pred_high": "ALTER TABLE analyses ADD COLUMN pred_high REAL",
         }
         for column, statement in migrations.items():
             if column not in columns:
@@ -83,6 +89,8 @@ def save_analysis(session_id: str, question: str, result: dict[str, Any],
         "slope": result.get("slope"),
         "intercept": result.get("intercept"),
         "prediction": result.get("prediction"),
+        "pred_low": (result.get("prediction_interval") or {}).get("low"),
+        "pred_high": (result.get("prediction_interval") or {}).get("high"),
         "r2": result.get("r2"),
         "chart_url": result.get("chart_url"),
         "answer_text": answer_text,
@@ -97,7 +105,8 @@ def save_analysis(session_id: str, question: str, result: dict[str, Any],
         if existing:
             conn.execute(
                 """UPDATE analyses SET x_json = :x_json, y_json = :y_json, predict_x = :predict_x,
-                       slope = :slope, intercept = :intercept, prediction = :prediction, r2 = :r2,
+                       slope = :slope, intercept = :intercept, prediction = :prediction,
+                       pred_low = :pred_low, pred_high = :pred_high, r2 = :r2,
                        chart_url = :chart_url, answer_text = :answer_text, created_at = :created_at
                    WHERE id = :id""",
                 {**payload, "id": existing["id"]},
@@ -106,10 +115,11 @@ def save_analysis(session_id: str, question: str, result: dict[str, Any],
             return int(existing["id"])
         cursor = conn.execute(
             """INSERT INTO analyses
-               (session_id, question, x_json, y_json, predict_x, slope, intercept, prediction, r2,
-                chart_url, answer_text, created_at, source)
+               (session_id, question, x_json, y_json, predict_x, slope, intercept, prediction,
+                pred_low, pred_high, r2, chart_url, answer_text, created_at, source)
                VALUES (:session_id, :question, :x_json, :y_json, :predict_x, :slope, :intercept,
-                       :prediction, :r2, :chart_url, :answer_text, :created_at, :source)""",
+                       :prediction, :pred_low, :pred_high, :r2, :chart_url, :answer_text,
+                       :created_at, :source)""",
             payload,
         )
         conn.commit()
@@ -236,6 +246,8 @@ def _row_to_record(row: sqlite3.Row) -> dict[str, Any]:
         record["slope"] = row["slope"]
         record["intercept"] = row["intercept"]
         record["prediction"] = row["prediction"]
+        record["pred_low"] = row["pred_low"] if "pred_low" in row.keys() else None
+        record["pred_high"] = row["pred_high"] if "pred_high" in row.keys() else None
         record["r2"] = row["r2"]
         record["chart_url"] = row["chart_url"]
     return record
@@ -297,6 +309,11 @@ def parse_date_range(text: str) -> tuple[str, str] | None:
         return None
 
 
+def _escape_like(value: str) -> str:
+    """转义 LIKE 的通配符：用户搜「%」时不应该把全部记录都命中。"""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def search_records(
     query: str | None = None,
     session_id: str | None = None,
@@ -321,12 +338,22 @@ def search_records(
     sid = (session_id or "").strip()
 
     if sid:
-        clauses.append("session_id LIKE ?")
-        params.append(f"{sid}%")
+        clauses.append("session_id LIKE ? ESCAPE '\\'")
+        params.append(f"{_escape_like(sid)}%")
     if keyword:
-        clauses.append("(question LIKE ? OR IFNULL(answer_text, '') LIKE ? OR session_id LIKE ?)")
-        like = f"%{keyword}%"
-        params += [like, like, f"{keyword}%"]
+        # 支持空格分隔的多关键词（"成绩 波动" = 两个词都要出现），
+        # 但没有 FTS 时的替代：每个词在问题/回答/会话 ID 任一字段命中即可。
+        terms = [term for term in re.split(r"\s+", keyword) if term][:5]
+        term_clauses: list[str] = []
+        for term in terms:
+            like = f"%{_escape_like(term)}%"
+            term_clauses.append(
+                "(question LIKE ? ESCAPE '\\' OR IFNULL(answer_text, '') LIKE ? ESCAPE '\\' "
+                "OR session_id LIKE ? ESCAPE '\\')"
+            )
+            params += [like, like, f"{_escape_like(term)}%"]
+        if term_clauses:
+            clauses.append("(" + " AND ".join(term_clauses) + ")")
     if date_from:
         clauses.append("substr(created_at, 1, 10) >= ?")
         params.append(date_from)

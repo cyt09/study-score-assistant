@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any
 
 from config import settings
@@ -25,10 +26,11 @@ except Exception:  # pragma: no cover - 依赖缺失时给出可读错误
 
 
 class LLMError(Exception):
-    def __init__(self, message: str, detail: str = "") -> None:
+    def __init__(self, message: str, detail: str = "", code: str = "UNKNOWN") -> None:
         super().__init__(message)
         self.message = message
         self.detail = detail
+        self.code = code
 
 
 def _normalize_tool_calls(raw_calls: Any) -> list[dict[str, Any]]:
@@ -75,20 +77,50 @@ class LLMClient:
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
-        try:
-            response = self._client.chat.completions.create(**kwargs)
-        except AuthenticationError as exc:
-            raise LLMError("模型鉴权失败（401）", "API Key 无效或已过期，请检查 .env 中的 DEEPSEEK_API_KEY") from exc
-        except RateLimitError as exc:
-            raise LLMError("模型限流或余额不足（429）", str(exc)[:300]) from exc
-        except APITimeoutError as exc:
-            raise LLMError(f"模型请求超时（>{settings.timeout:.0f}s）", "可调大 LLM_TIMEOUT 或稍后重试") from exc
-        except APIConnectionError as exc:
-            raise LLMError("无法连接模型服务", str(exc)[:300]) from exc
-        except APIStatusError as exc:
-            raise LLMError(f"模型服务返回异常状态码 {exc.status_code}", str(exc)[:300]) from exc
-        except Exception as exc:  # 兜底：不让未预期异常打断会话状态
-            raise LLMError("模型调用发生未预期错误", f"{type(exc).__name__}: {exc}"[:300]) from exc
+        last_error: LLMError | None = None
+        attempts = max(0, settings.llm_max_retries) + 1
+        for attempt in range(attempts):
+            try:
+                response = self._client.chat.completions.create(**kwargs)
+                break
+            except AuthenticationError as exc:
+                # 鉴权失败重试没有意义，直接报错
+                raise LLMError(
+                    "模型鉴权失败（401）",
+                    "API Key 无效或已过期，请检查 .env 中的 DEEPSEEK_API_KEY",
+                    code="AUTH",
+                ) from exc
+            except RateLimitError as exc:
+                last_error = LLMError("模型限流或余额不足（429）", str(exc)[:300], code="RATE_LIMIT")
+            except APITimeoutError:
+                last_error = LLMError(
+                    f"模型请求超时（>{settings.timeout:.0f}s）",
+                    "可调大 LLM_TIMEOUT 或稍后重试",
+                    code="TIMEOUT",
+                )
+            except APIConnectionError as exc:
+                last_error = LLMError("无法连接模型服务", str(exc)[:300], code="CONNECTION")
+            except APIStatusError as exc:
+                if exc.status_code >= 500:
+                    last_error = LLMError(
+                        f"模型服务返回异常状态码 {exc.status_code}",
+                        str(exc)[:300],
+                        code="SERVER",
+                    )
+                else:
+                    raise LLMError(
+                        f"模型服务返回异常状态码 {exc.status_code}", str(exc)[:300], code="API_ERROR"
+                    ) from exc
+            except Exception as exc:  # 兜底：不让未预期异常打断会话状态
+                raise LLMError(
+                    "模型调用发生未预期错误", f"{type(exc).__name__}: {exc}"[:300], code="UNKNOWN"
+                ) from exc
+
+            # 能走到这里的都是瞬时故障：429 / 超时 / 连接失败 / 5xx
+            if attempt < attempts - 1:
+                time.sleep(settings.llm_retry_backoff * (2**attempt))
+                continue
+            raise last_error
 
         choice = response.choices[0]
         message = choice.message
@@ -103,6 +135,8 @@ class LLMClient:
                 "total_tokens": getattr(usage, "total_tokens", None),
             },
             "model": getattr(response, "model", settings.model),
+            # 实际发生的退避重试次数，写进运行日志，便于判断是不是模型侧在抖
+            "retries": attempt,
         }
 
 

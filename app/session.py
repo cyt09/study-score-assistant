@@ -7,9 +7,13 @@
 from __future__ import annotations
 
 import threading
+import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
+
+from app import db
 
 
 @dataclass
@@ -17,6 +21,13 @@ class Session:
     session_id: str
     messages: list[dict[str, Any]] = field(default_factory=list)
     last_dataset: dict[str, Any] | None = None
+    # 每个会话一把锁：同一会话的并发请求排队执行，避免两条消息交错写进 messages
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    # 最后活跃时间（monotonic 秒），供 SessionStore 做过期清理
+    last_active: float = field(default_factory=time.monotonic)
+
+    def touch(self) -> None:
+        self.last_active = time.monotonic()
 
     def add_message(self, role: str, content: str) -> None:
         self.messages.append({"role": role, "content": content})
@@ -84,20 +95,77 @@ def _fallback_answer(record: dict[str, Any]) -> str:
 
 
 class SessionStore:
-    def __init__(self) -> None:
-        self._sessions: dict[str, Session] = {}
+    """内存会话表：有上限、会过期、未命中时从数据库回填。
+
+    之前只用一个只增不减的 dict：长跑会缓慢涨内存，服务重启后同一 session_id
+    会拿到一个空白会话（前端 localStorage 里还存着这个 id），追问就"失忆"了。
+    现在未命中先查库，把历史对话与最近一次数据集恢复回来。
+    """
+
+    def __init__(self, max_sessions: int = 200, ttl_seconds: float = 2 * 3600) -> None:
+        self._sessions: OrderedDict[str, Session] = OrderedDict()
         self._lock = threading.Lock()
+        self._max_sessions = max_sessions
+        self._ttl = ttl_seconds
+        self.restored_count = 0
 
     def get_or_create(self, session_id: str | None) -> Session:
+        key = session_id or uuid.uuid4().hex
+        now = time.monotonic()
+
         with self._lock:
-            key = session_id or uuid.uuid4().hex
-            if key not in self._sessions:
-                self._sessions[key] = Session(session_id=key)
-            return self._sessions[key]
+            self._sweep(now)
+            existing = self._sessions.get(key)
+            if existing is not None:
+                existing.touch()
+                self._sessions.move_to_end(key)
+                return existing
+
+        # 未命中：可能是服务重启过，也可能是很久没说话被清掉了 —— 从数据库回填。
+        # IO 放在锁外，避免一次查库把整个会话表卡住。
+        session = Session(session_id=key)
+        if session_id:
+            try:
+                records = db.list_session_records(key)
+            except Exception:  # 数据库异常不应阻断对话，退化成空会话
+                records = []
+            if records:
+                session.restore_from_records(records)
+                with self._lock:
+                    self.restored_count += 1
+
+        with self._lock:
+            # 并发下可能已有别的请求先建好了，以先到者为准
+            existing = self._sessions.get(key)
+            if existing is not None:
+                return existing
+            session.touch()
+            self._sessions[key] = session
+            self._sweep(time.monotonic())
+            while len(self._sessions) > self._max_sessions:
+                self._sessions.popitem(last=False)
+        return session
+
+    def _sweep(self, now: float) -> None:
+        """清理空闲超时的会话（调用方需已持有 self._lock）。"""
+        if self._ttl <= 0:
+            return
+        expired = [key for key, item in self._sessions.items() if now - item.last_active > self._ttl]
+        for key in expired:
+            self._sessions.pop(key, None)
 
     def reset(self, session_id: str) -> None:
         with self._lock:
             self._sessions.pop(session_id, None)
+
+    def stats(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "in_memory": len(self._sessions),
+                "max_sessions": self._max_sessions,
+                "ttl_seconds": int(self._ttl),
+                "restored_from_db": self.restored_count,
+            }
 
 
 store = SessionStore()

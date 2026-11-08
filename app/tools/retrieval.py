@@ -22,7 +22,37 @@ from pathlib import Path
 from config import settings
 
 _CJK = re.compile(r"[\u4e00-\u9fff]")
-_WORD = re.compile(r"[a-zA-Z0-9_]{2,}")
+# 允许单字母 + 上标（R²、t 值）这类术语：原来的 {2,} 会把 "R²" 整个丢掉，
+# 导致"R² 是什么意思"只剩"意思/解读"两个词，直接判成资料不足。
+_WORD = re.compile(r"[a-zA-Z0-9_²]+")
+
+# 查询扩展：口语说法与资料用词对不上时（"突然掉了20分" vs "成绩波动"），
+# 用一张小型同义词表把领域术语补进查询。只补领域词，不补通用词，避免把无关问题拉进来。
+_SYNONYMS = (
+    (("掉分", "掉了", "跌了", "降了", "下滑", "退步", "起伏", "忽高忽低", "考差", "没考好", "不稳定"),
+     "成绩波动 原因"),
+    (("紧张", "失常", "发挥", "心态", "焦虑", "状态不好"), "临场状态 发挥"),
+    (("两个点", "两点", "数据点", "次数太少", "样本"), "样本量 趋势判断"),
+    (("因为", "导致", "因果", "原因", "是不是"), "相关 因果"),
+    (("r²", "r2", "拟合优度", "决定系数"), "R² 拟合优度"),
+    (("外推", "往后推", "未来"), "外推 风险"),
+    (("复习", "记忆", "遗忘", "错题", "拖延", "专注", "效率"), "学习效率 复习"),
+)
+
+
+def _expansion_terms(query: str) -> list[str]:
+    """把口语化说法映射到资料里的术语，返回**独立切好的**扩展词。
+
+    不能把扩展文本直接拼进原句：中文二元组按字符相邻切分，拼接处会产出
+    "率复""率高"这种跨词垃圾词，反而拉低覆盖率。
+    """
+    lowered = query.lower()
+    terms: list[str] = []
+    for triggers, expansion in _SYNONYMS:
+        if any(trigger in lowered for trigger in triggers):
+            terms.extend(_tokenize(expansion))
+    # 去重但保持顺序，避免同一批词被重复计入词频
+    return list(dict.fromkeys(terms))
 
 # 高频虚词：出现在二元组里说明该二元组多半是语法片段而非术语
 _STOP_CHARS = set(
@@ -46,8 +76,8 @@ class Chunk:
 
 def _tokenize(text: str) -> list[str]:
     """英文/数字按词切分；中文取相邻二元组，并丢掉含虚词的二元组。"""
-    text = text.lower()
-    tokens = _WORD.findall(text)
+    text = text.lower().replace("²", "2")
+    tokens = [token for token in _WORD.findall(text) if len(token) > 1]
     chars = _CJK.findall(text)
     for i in range(len(chars) - 1):
         bigram = chars[i] + chars[i + 1]
@@ -131,6 +161,31 @@ class KnowledgeBase:
 
     def search(self, query: str, top_k: int | None = None,
                min_score: float | None = None, mode: str = "hybrid") -> dict:
+        """先按原话检索；原话一个片段都没命中时，再用同义词扩展重试一次。
+
+        之所以做"兜底式"扩展而不是一开始就扩展：扩展会引入额外词，
+        可能把本来排第一的正确片段挤下去（"如何提高复习效率"就踩过）。
+        只在原话完全无命中时启用，既救回口语化问题，又不影响已经正确的排序。
+        """
+        result = self._search_once(query, top_k=top_k, min_score=min_score, mode=mode)
+        if result.get("hits"):
+            return result
+
+        expanded = _expansion_terms(query)
+        if not expanded:
+            return result
+
+        retry = self._search_once(query, top_k=top_k, min_score=min_score, mode=mode, extra_terms=expanded)
+        if retry.get("hits"):
+            retry["expanded_from"] = query
+            retry["query"] = query
+            retry["note"] = "原话未命中，已按同义术语扩展后重试"
+            return retry
+        return result
+
+    def _search_once(self, query: str, top_k: int | None = None,
+                     min_score: float | None = None, mode: str = "hybrid",
+                     extra_terms: list[str] | None = None) -> dict:
         top_k = top_k or settings.retrieval_top_k
         min_score = settings.retrieval_min_score if min_score is None else min_score
         mode = str(mode or "hybrid").lower()
@@ -142,12 +197,13 @@ class KnowledgeBase:
         if not self.chunks:
             return {"ok": False, "error_code": "EMPTY_KB", "message": "知识库为空，没有任何资料", "hits": []}
 
-        query_terms = sorted(set(_tokenize(query)))
+        terms = _tokenize(query) + list(extra_terms or [])
+        query_terms = sorted(set(terms))
         if not query_terms:
             return {"ok": False, "error_code": "EMPTY_QUERY", "message": "检索问题中没有可用关键词", "hits": []}
 
         k1, b = 1.5, 0.75
-        query_tf = Counter(_tokenize(query))
+        query_tf = Counter(terms)
         scored: list[tuple[float, float, Chunk, list[str]]] = []
         for chunk in self.chunks:
             tf = Counter(chunk.tokens)

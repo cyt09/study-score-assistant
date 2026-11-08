@@ -1,0 +1,36 @@
+{
+  "note": "检索评估集：positive 表示知识库确实覆盖，应该命中指定文件；negative 表示知识库不覆盖，应当返回空命中（明确说资料不足）。",
+  "top_k": 3,
+  "cases": [
+    {"query": "怎么安排复习时间比较合理", "should_hit": true, "expect": "学习效率与成绩提升.md", "type": "paraphrase"},
+    {"query": "主动回忆和反复看书哪个更有效", "should_hit": true, "expect": "学习效率与成绩提升.md", "type": "term"},
+    {"query": "间隔重复是什么意思，怎么用", "should_hit": true, "expect": "学习效率与成绩提升.md", "type": "term"},
+    {"query": "错题本要怎么用才有效", "should_hit": true, "expect": "学习效率与成绩提升.md", "type": "term"},
+    {"query": "总是拖延，时间管理有什么办法", "should_hit": true, "expect": "学习效率与成绩提升.md", "type": "paraphrase"},
+    {"query": "每天学到很晚但效率很低怎么办", "should_hit": true, "expect": "学习效率与成绩提升.md", "type": "paraphrase"},
+
+    {"query": "这次成绩突然掉了20分是什么原因", "should_hit": true, "expect": "成绩波动原因分析.md", "type": "paraphrase"},
+    {"query": "试卷难度不同会不会影响分数", "should_hit": true, "expect": "成绩波动原因分析.md", "type": "term"},
+    {"query": "考试时紧张发挥失常怎么办", "should_hit": true, "expect": "成绩波动原因分析.md", "type": "paraphrase"},
+    {"query": "只有三四次成绩能看出趋势吗", "should_hit": true, "expect": "成绩波动原因分析.md", "type": "paraphrase"},
+    {"query": "这次考差了是不是临场状态不好", "should_hit": true, "expect": "成绩波动原因分析.md", "type": "paraphrase"},
+
+    {"query": "成绩提高是因为我增加了学习时间吗", "should_hit": true, "expect": "相关与因果的区别.md", "type": "paraphrase"},
+    {"query": "相关和因果有什么区别", "should_hit": true, "expect": "相关与因果的区别.md", "type": "term"},
+    {"query": "是不是睡眠不足导致成绩下降", "should_hit": true, "expect": "相关与因果的区别.md", "type": "paraphrase"},
+    {"query": "相关不等于因果这句话怎么理解", "should_hit": true, "expect": "相关与因果的区别.md", "type": "term"},
+
+    {"query": "R² 是什么意思，怎么解读", "should_hit": true, "expect": "线性拟合与趋势预测.md", "type": "term"},
+    {"query": "为什么不能用两个点预测未来", "should_hit": true, "expect": "线性拟合与趋势预测.md", "type": "paraphrase"},
+    {"query": "外推会有什么风险", "should_hit": true, "expect": "线性拟合与趋势预测.md", "type": "term"},
+    {"query": "最小二乘法到底是怎么算的", "should_hit": true, "expect": "线性拟合与趋势预测.md", "type": "term"},
+    {"query": "什么情况下无法做线性拟合", "should_hit": true, "expect": "线性拟合与趋势预测.md", "type": "paraphrase"},
+
+    {"query": "帮我写一首关于秋天的诗", "should_hit": false, "type": "off_topic"},
+    {"query": "Python 的列表和元组有什么区别", "should_hit": false, "type": "off_topic"},
+    {"query": "今天北京天气怎么样", "should_hit": false, "type": "off_topic"},
+    {"query": "红烧肉怎么做才不腻", "should_hit": false, "type": "off_topic"},
+    {"query": "推荐一部好看的科幻电影", "should_hit": false, "type": "off_topic"},
+    {"query": "怎么申请护照", "should_hit": false, "type": "off_topic"}
+  ]
+}

@@ -29,6 +29,21 @@ class RunLogger:
         self.run_id = run_id
         self.path: Path = settings.log_dir / filename
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._rotate_if_needed()
+
+    def _rotate_if_needed(self) -> None:
+        """超过阈值就把 run.jsonl 改名存档，保证单个文件不会无限增长。
+
+        保留 run.jsonl 这个名字作为"当前日志"：错误信息里写的
+        「可在 logs/run.jsonl 中检索该编号」对最近的问题依然成立，
+        老日志按 run-时间戳.jsonl 归档。
+        """
+        try:
+            if self.path.exists() and self.path.stat().st_size >= settings.log_max_bytes:
+                stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                self.path.rename(self.path.with_name(f"run-{stamp}.jsonl"))
+        except OSError:  # 并发改名失败不影响写日志
+            pass
 
     def log(self, step: str, event: str, payload: dict[str, Any] | None = None) -> None:
         entry = {
