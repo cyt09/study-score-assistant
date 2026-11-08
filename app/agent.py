@@ -137,7 +137,7 @@ def _needs_tool(text: str) -> bool:
 # 否则"第一次 78、第二次 82"这种数据描述会被误判成"要预测第 1 次"。
 _PREDICT_INTENT = ("预测", "预估", "预计", "推算", "推断", "估计", "会考", "能考",
                    "多少", "几分", "大概", "猜")
-_POSITION_PATTERN = re.compile(r"第\s*([0-9]+|[一二三四五六七八九十两]+)\s*(?:次|回|场)")
+_POSITION_PATTERN = re.compile(r"第\s*([0-9零一二三四五六七八九十两]+)\s*(?:次|回|场)")
 # "第五次呢？/ 第五次会多少"这类追问，即使整句较长也算明确指定了位置
 _POSITION_FOLLOW_RE = re.compile(
     r"第\s*(?:[0-9]+|[一二三四五六七八九十两]+)\s*(?:次|回|场)\s*(?:呢|会|能|大概|多少|是多少|怎么样|如何|[?？]|$)"
@@ -160,7 +160,9 @@ def _predict_position_hint(text: str) -> int | str | None:
     positions: list[int] = []
     for token in _POSITION_PATTERN.findall(text):
         value = int(token) if token.isdigit() else cn_to_int(token)
-        if value:
+        # 第 0 次、第零次也是"用户明确说了一个位置"，只是位置本身不合法，
+        # 必须原样交给工具去拒绝（BAD_PREDICT_X），不能当成"没指定"静默略过
+        if value is not None:
             positions.append(value)
 
     wants_predict = any(word in text for word in _PREDICT_INTENT)
@@ -197,8 +199,17 @@ def _slot_display(raw: str) -> str:
     return _SCORE_UNIT.sub("", text).strip()
 
 
+# 用户可能用各种减号写负分：-5、−5（U+2212）、－5（全角）、负5
+_MINUS_VARIANTS = str.maketrans({"−": "-", "－": "-", "–": "-"})
+_NUMBER_RE = re.compile(r"-?\d{1,3}(?:\.\d+)?")
+
+
 def _slot_kind(raw: str) -> tuple[str | None, float | None]:
-    """判断一个片段是"数字成绩""空缺"还是"看不懂"。"""
+    """判断一个片段是"数字成绩""空缺"还是"看不懂"。
+
+    负分属于"有数值但越界"，这里仍返回 num（值为负），
+    由调用方按 INVALID_SCORE 报"成绩不能为负"，而不是笼统说"没填"。
+    """
     text = (raw or "").strip().strip("。.！!？? ")
     if not text:
         return None, None
@@ -206,22 +217,26 @@ def _slot_kind(raw: str) -> tuple[str | None, float | None]:
     text = _SCORE_UNIT.sub("", text).strip()
     if text in _SCORE_BLANKS:
         return "gap", None
-    if re.fullmatch(r"\d{1,3}(?:\.\d+)?", text):
-        return "num", float(text)
-    if re.fullmatch(r"[一二三四五六七八九十百两]{1,3}", text):
+    text = text.translate(_MINUS_VARIANTS)
+    negative = text.startswith("负")
+    if negative:
+        text = text[1:].strip()
+    if _NUMBER_RE.fullmatch(text):
+        value = float(text)
+        return "num", -value if negative else value
+    if re.fullmatch(r"[零一二三四五六七八九十百两]{1,3}", text):
         value = cn_to_int(text)
-        if value:
-            return "num", float(value)
+        if value is not None:
+            return "num", -float(value) if negative else float(value)
     return None, None
 
 
-def _score_list_gap(text: str) -> list[str] | None:
-    """从用户原话里找出"成绩序列中的空格"。
+def _score_slots(text: str) -> list[tuple[str, str, float | None]] | None:
+    """把用户原话切成"成绩序列"，返回 [(显示值, kind, 数值)]。
 
-    只在能明确认出"一串成绩"时才判定，例如：
-        第一次 78，第二次缺考，第三次 85   → 返回 ['78', '缺考', '85']
-        我的成绩是 78、abc、85            → 返回 ['78', 'abc', '85']
+    只在能明确认出"一串成绩"时才返回结果（至少 3 段、其中 2 段是数字），
     普通句子（含数字但不成列表）一律返回 None，避免误伤。
+    kind 只有两种：num（有数值，可能越界）、gap（缺考/没写/看不懂）。
     """
     tokens = [t for t in _SCORE_DELIM.split(text or "") if t.strip()]
     if len(tokens) < 3:
@@ -254,18 +269,43 @@ def _score_list_gap(text: str) -> list[str] | None:
 
     if sum(1 for kind, _ in kinds if kind == "num") < 2:
         return None
-    if not any(kind == "gap" for kind, _ in kinds):
-        return None
 
-    cleaned: list[str] = []
+    slots: list[tuple[str, str, float | None]] = []
     for token, (kind, value) in zip(tokens, kinds):
         if kind == "num" and value is not None:
-            cleaned.append(str(int(value)) if float(value).is_integer() else f"{value:g}")
-        elif kind == "gap":
-            cleaned.append(_slot_display(token) or token.strip())
+            display = str(int(value)) if float(value).is_integer() else f"{value:g}"
         else:
-            cleaned.append(token.strip())
-    return cleaned
+            display = _slot_display(token) or token.strip()
+        slots.append((display, kind or "gap", value))
+    return slots
+
+
+def _score_list_gap(text: str) -> list[str] | None:
+    """从用户原话里找出"成绩序列中的空格"（缺考、写成文字、留空）。
+
+    例如：第一次 78，第二次缺考，第三次 85 → ['78', '缺考', '85']
+    """
+    slots = _score_slots(text)
+    if not slots or not any(kind == "gap" for _, kind, _ in slots):
+        return None
+    return [display for display, _, _ in slots]
+
+
+def _score_list_invalid(text: str) -> list[str] | None:
+    """从用户原话里找出"有数值但越界"的成绩（负数 / 超过满分上限）。
+
+    例如：78、-5、85 → ['78', '-5', '85']
+    """
+    slots = _score_slots(text)
+    if not slots:
+        return None
+    out_of_range = any(
+        kind == "num" and value is not None and (value < 0 or value > _MAX_SCORE)
+        for _, kind, value in slots
+    )
+    if not out_of_range:
+        return None
+    return [display for display, _, _ in slots]
 
 
 def _missing_slots_error(scores: list[str]) -> dict[str, Any]:
@@ -279,6 +319,20 @@ def _missing_slots_error(scores: list[str]) -> dict[str, Any]:
         "message": f"成绩里有 {len(gaps)} 次没有有效数字：{labels} {values}",
         "hint": "请把这一次补上；如果确实缺考，也请说明这次按多少分算，或者去掉这一次",
         "detail": {"field": "y", "invalid_indexes": gaps, "scores": scores},
+    }
+
+
+def _invalid_score_error(scores: list[str]) -> dict[str, Any]:
+    """成绩越界（负数或超过满分上限）：直接拒绝分析，并指出具体是第几次。"""
+    indexes = _invalid_score_indexes(scores)
+    labels = "、".join(f"第 {i} 个" for i in indexes)
+    values = "、".join(f"「{scores[i - 1]}」" for i in indexes)
+    return {
+        "ok": False,
+        "error_code": "INVALID_SCORE",
+        "message": f"成绩里有 {len(indexes)} 次超出有效范围（0—{_MAX_SCORE:g} 分）：{labels} {values}",
+        "hint": "成绩不能为负，也不能超过满分上限，请核对后修改",
+        "detail": {"field": "y", "invalid_indexes": indexes, "scores": scores},
     }
 
 
@@ -317,6 +371,14 @@ def _align_predict_arguments(
                 return args, False, None
     else:
         target = int(hint)
+
+    # 用户说的是"第 0 次"这类无效位置：不做纠正、不猜一个，原样交给工具拒绝
+    if target < 1:
+        args["predict_x"] = target
+        return args, True, (
+            f"【程序校验】用户指定的预测位置「第 {target} 次」不是有效的考试序号，已原样传给工具。"
+            "请照抄工具返回的错误说明，引导用户重新选择要预测第几次；本次不得给出任何预测值。"
+        )
 
     if model_value is not None:
         try:
@@ -677,6 +739,8 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
     position_hint = _predict_position_hint(user_text)
     # 用户原话里的成绩序列如果本身有空缺（缺考、写成文字），先补全再算
     score_gap = _score_list_gap(user_text)
+    # 原话里出现负分/超上限的成绩：不让残缺或异常数据进入拟合
+    score_invalid = _score_list_invalid(user_text)
 
     base_messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     base_messages.extend(session.messages)
@@ -769,6 +833,30 @@ def handle_message(user_text: str, session, source: str = db.SOURCE_WEB) -> Chat
                 if name == "analyze_score_trend" and score_gap:
                     result = _missing_slots_error(score_gap)
                     logger.log("guard", "missing_score_value", {"scores": score_gap})
+                    tool_records.append(
+                        ToolCallRecord(
+                            name=name,
+                            arguments=arguments,
+                            ok=False,
+                            summary=f"工具拒绝执行：{result['error_code']} {result['message']}",
+                        )
+                    )
+                    last_tool_error = {"result": result, "arguments": arguments}
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call["id"],
+                            "content": json.dumps(result, ensure_ascii=False),
+                        }
+                    )
+                    round_notes.append(_failed_tool_note(result))
+                    continue
+
+                # 用户原话里有越界的成绩（负数、超过满分）：按 INVALID_SCORE 拒绝，
+                # 让用户看到"第几次是负分"而不是笼统的"没填"
+                if name == "analyze_score_trend" and score_invalid:
+                    result = _invalid_score_error(score_invalid)
+                    logger.log("guard", "invalid_score_value", {"scores": score_invalid})
                     tool_records.append(
                         ToolCallRecord(
                             name=name,

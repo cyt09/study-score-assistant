@@ -569,6 +569,69 @@ class AgentFlowTest(unittest.TestCase):
         self.assertEqual(response.fix["scores"], ["78", "缺考", "85"])
         self.assertEqual(response.fix["invalid"], [2])
 
+    def test_negative_score_reports_invalid_range_not_missing(self):
+        """负分是"有值但越界"，要报 INVALID_SCORE（成绩不能为负），不能笼统说"没填"。"""
+        self.assertEqual(agent._slot_kind("-5"), ("num", -5.0))
+        self.assertEqual(agent._slot_kind("−5"), ("num", -5.0))
+        self.assertEqual(agent._slot_kind("负5"), ("num", -5.0))
+        self.assertIsNone(agent._score_list_gap("我三次成绩是 78、-5、85"))
+        self.assertEqual(agent._score_list_invalid("我三次成绩是 78、-5、85"), ["78", "-5", "85"])
+        self.assertEqual(agent._score_list_invalid("四次成绩 78、82、85、200"), ["78", "82", "85", "200"])
+        self.assertIsNone(agent._score_list_invalid("第四次 78、82、85、88"))
+
+        # 端到端：模型就算把 -5 悄悄换成 0 再调工具，程序仍按用户原话拒绝
+        fake = FakeClient([
+            tool_call_response("analyze_score_trend", {"x": [1, 2, 3], "y": [78, 0, 85], "predict_x": 4}),
+            content_response(self._cannot_judge(
+                "第二次成绩是负数，不能作为有效分数参与拟合，请改成真实成绩。",
+                "第二次考试的真实分数是多少？",
+            )),
+        ])
+        original = agent.build_client
+        agent.build_client = lambda: fake
+        try:
+            response = agent.handle_message("我三次成绩是 78、-5、85，帮我看看趋势，预测第四次", self.session)
+        finally:
+            agent.build_client = original
+
+        self.assertIsNone(response.error)
+        self.assertFalse(response.tool_calls[0].ok)
+        self.assertIn("INVALID_SCORE", response.tool_calls[0].summary)
+        self.assertIsNone(response.chart_url)
+        self.assertEqual(response.reply.trend, "无法判断")
+        self.assertIsNone(response.reply.prediction)
+        self.assertEqual(response.fix["kind"], "edit_scores")
+        self.assertEqual(response.fix["title"], "有成绩超出有效范围")
+        self.assertEqual(response.fix["scores"], ["78", "-5", "85"])
+        self.assertEqual(response.fix["invalid"], [2])
+
+    def test_zero_predict_position_is_rejected_not_ignored(self):
+        """"预测第 0 次"是无效位置：必须明确拒绝，不能静默当成"没指定"。"""
+        self.assertEqual(agent._predict_position_hint("三次成绩 78、82、85，帮我预测第 0 次"), 0)
+        self.assertEqual(agent._predict_position_hint("三次成绩 78、82、85，帮我预测第零次"), 0)
+
+        fake = FakeClient([
+            tool_call_response("analyze_score_trend", {"x": [1, 2, 3], "y": [78, 82, 85]}),
+            content_response(self._cannot_judge(
+                "预测位置不能是第 0 次，考试序号从第 1 次开始，请选择要预测第几次。",
+                "你想预测第几次？",
+            )),
+        ])
+        original = agent.build_client
+        agent.build_client = lambda: fake
+        try:
+            response = agent.handle_message("三次成绩 78、82、85，帮我预测第 0 次", self.session)
+        finally:
+            agent.build_client = original
+
+        self.assertIsNone(response.error)
+        self.assertFalse(response.tool_calls[0].ok)
+        self.assertIn("BAD_PREDICT_X", response.tool_calls[0].summary)
+        self.assertIsNone(response.reply.prediction)
+        self.assertEqual(response.fix["kind"], "choose_predict")
+        self.assertEqual(response.fix["title"], "选择要预测第几次考试")
+        self.assertIn("预测位置 0 无效", response.fix["hint"])
+
     def test_program_notes_keep_tool_message_order(self):
         """一轮里多个工具调用：程序提示必须排在所有 tool 结果之后，否则服务方会判非法请求。"""
         fake = FakeClient([
