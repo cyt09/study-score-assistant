@@ -99,7 +99,7 @@ def render_markdown(cases: list[dict], top_k: int, base: dict, rows: list[dict])
     lines = [
         "# 检索评估",
         "",
-        "自动生成，请勿手改（`python scripts/eval_retrieval.py --write`）。",
+        "这份文件是脚本生成的，不用手改；要更新就跑 `python scripts/eval_retrieval.py --write`。",
         "",
         f"- 评估集：`eval/retrieval_cases.json`，共 {len(cases)} 条"
         f"（应命中 {base['positives']} 条 / 应空结果 {base['negatives']} 条），top_k={top_k}",
