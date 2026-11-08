@@ -222,7 +222,7 @@ def main() -> int:
 
     sections.append("## 三、如何复核\n")
     sections.append("1. 数值部分：直接运行 `python scripts/verify_calc.py`，退出码 0 即全部通过；")
-    sections.append("2. 场景部分：按 docs/录制指南.md 启动服务后，在页面上重现上述对话；")
+    sections.append("2. 场景部分：启动服务（`python -m uvicorn app.main:app --port 8000`）后，在页面上重现上述对话；")
     sections.append(f"3. 完整请求/响应原文（含 token 用量）见 `{log_path.name}`，已脱敏（无密钥信息）。")
 
     DOCS.mkdir(exist_ok=True)
