@@ -92,13 +92,21 @@ function appendLoading() {
 
   const phrases = ["模型正在理解问题…", "正在决定是否调用工具…", "正在执行计算与检索…", "正在校验输出字段…"];
   let index = 0;
+  const node = wrapper.querySelector(".loading-text");
   const timer = setInterval(() => {
     index = (index + 1) % phrases.length;
-    const node = wrapper.querySelector(".loading-text");
     if (node) node.textContent = phrases[index];
   }, 1600);
 
-  return { wrapper, stop: () => clearInterval(timer) };
+  return {
+    wrapper,
+    stop: () => clearInterval(timer),
+    // 后端 SSE 推进度时接管文案：停掉轮播，显示真实阶段
+    setPhase: (text) => {
+      clearInterval(timer);
+      if (node && text) node.textContent = text;
+    },
+  };
 }
 
 function statBlock(label, value) {
@@ -133,6 +141,16 @@ function renderAnswer(payload) {
   }
   if (answer.prediction !== null && answer.prediction !== undefined) {
     stats.appendChild(statBlock("预测值", formatNum(answer.prediction)));
+  }
+  // 预测区间由程序计算后直接下发，不经过模型转述
+  if (payload.prediction_interval) {
+    const band = payload.prediction_interval;
+    stats.appendChild(
+      statBlock(
+        `预测区间 ${Math.round((band.level || 0.95) * 100)}%`,
+        `${formatNum(band.low)}–${formatNum(band.high)}`,
+      ),
+    );
   }
   card.appendChild(stats);
 
@@ -230,6 +248,15 @@ function renderError(payload) {
   title.textContent = "本次请求没有完成：" + (payload.error || "未知错误");
   card.appendChild(title);
 
+  // 错误分类由后端下发（AUTH/TIMEOUT/RATE_LIMIT/SCHEMA/ROUNDS…），
+  // 便于一眼看出是"Key 过期"还是"模型抽风"，排查时不用逐字读错误信息。
+  if (payload.error_code) {
+    const code = document.createElement("span");
+    code.className = "error-code";
+    code.textContent = payload.error_code;
+    card.appendChild(code);
+  }
+
   const tip = document.createElement("p");
   tip.className = "small";
   tip.style.margin = "0";
@@ -265,6 +292,86 @@ function formatNum(value) {
 
 /* ---------------- 请求 ---------------- */
 
+/* 后端 SSE 推来的阶段 → 给人看的一句话 */
+const PHASE_TEXT = {
+  thinking: (event) => `模型正在思考（第 ${event.round} 轮）…`,
+  tool: (event) => {
+    if (event.by === "program") return "正在补充检索本地资料…";
+    if (event.name === "analyze_score_trend") return "正在拟合成绩趋势…";
+    if (event.name === "search_study_knowledge") return "正在检索本地资料…";
+    return "正在调用工具…";
+  },
+  tool_done: (event) =>
+    event.name === "search_study_knowledge" ? "已拿到资料，正在组织回答…" : "已算出结果，正在组织回答…",
+  repair: () => "输出格式不合格，正在自动修正…",
+};
+
+/* 读 SSE：按空行切事件，取 data: 后的 JSON；任何解析失败都跳过，不影响主流程 */
+async function consumeStream(response, loading) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result = null;
+  let failure = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() || "";
+    for (const block of blocks) {
+      const line = block.split("\n").find((item) => item.startsWith("data:"));
+      if (!line) continue;
+      let event;
+      try {
+        event = JSON.parse(line.slice(5).trim());
+      } catch {
+        continue;
+      }
+      if (event.type === "progress") {
+        const render = PHASE_TEXT[event.phase];
+        if (render) loading.setPhase(render(event));
+      } else if (event.type === "result") {
+        result = event.payload;
+      } else if (event.type === "error") {
+        failure = event.message;
+      }
+    }
+  }
+
+  if (result) return { ok: true, payload: result };
+  throw new Error(failure || "连接中断，没有收到完整结果");
+}
+
+/* 老接口兜底：流式不可用（代理缓冲、浏览器不支持 ReadableStream）时仍能正常对话 */
+async function postChatFallback(body, headers) {
+  const response = await fetch("/api/chat", { method: "POST", headers, body });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return { ok: false, payload, httpError: payload.detail || `HTTP ${response.status}` };
+  }
+  return { ok: true, payload };
+}
+
+async function requestChat(message, loading) {
+  const body = JSON.stringify({ session_id: state.sessionId, message });
+  const headers = { "Content-Type": "application/json" };
+
+  let response;
+  try {
+    response = await fetch("/api/chat/stream", { method: "POST", headers, body });
+  } catch {
+    return postChatFallback(body, headers);
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!response.ok || !response.body || !contentType.includes("text/event-stream")) {
+    return postChatFallback(body, headers);
+  }
+  return consumeStream(response, loading);
+}
+
 async function sendMessage(text) {
   if (state.sending) return;
   const message = text.trim();
@@ -278,21 +385,16 @@ async function sendMessage(text) {
   const loading = appendLoading();
 
   try {
-    const response = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: state.sessionId, message }),
-    });
-
-    const payload = await response.json();
+    const outcome = await requestChat(message, loading);
     loading.stop();
     loading.wrapper.remove();
 
-    if (!response.ok) {
-      renderError({ error: payload.detail || `HTTP ${response.status}`, error_detail: "请求被后端拒绝" });
+    if (!outcome.ok) {
+      renderError({ error: outcome.httpError || "请求失败", error_detail: "请求被后端拒绝" });
       return;
     }
 
+    const payload = outcome.payload;
     state.sessionId = payload.session_id;
     localStorage.setItem("ssa_session", state.sessionId);
     syncSessionUI();
@@ -1112,6 +1214,11 @@ function showRecord(item) {
     body.appendChild(dialogRow("数据", `x=${JSON.stringify(item.x)}，y=${JSON.stringify(item.y)}`));
     body.appendChild(dialogRow("斜率 / 截距", `${formatNum(item.slope)} / ${formatNum(item.intercept)}`));
     body.appendChild(dialogRow("预测", `第 ${item.predict_x ?? "—"} 次 → ${item.prediction ?? "未预测"}`));
+    if (item.pred_low !== null && item.pred_low !== undefined && item.pred_high !== null && item.pred_high !== undefined) {
+      body.appendChild(
+        dialogRow("95% 预测区间", `${formatNum(item.pred_low)} — ${formatNum(item.pred_high)} 分`),
+      );
+    }
     body.appendChild(dialogRow("R²", formatNum(item.r2)));
     body.appendChild(dialogRow("时间", formatTime(item.created_at)));
 

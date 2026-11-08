@@ -5,10 +5,13 @@
 
 from __future__ import annotations
 
+import json
+import queue
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -50,6 +53,8 @@ def health() -> dict:
         "api_key_configured": bool(settings.api_key),
         "knowledge_files": knowledge_base.file_count,
         "knowledge_chunks": len(knowledge_base.chunks),
+        # 会话表是内存结构：有多少条、有没有过期清理、有多少次从库里回填
+        "sessions": store.stats(),
     }
 
 
@@ -64,6 +69,55 @@ def chat(payload: ChatRequest, x_client_source: str | None = Header(default=None
     session = store.get_or_create(payload.session_id)
     response = handle_message(message, session, source=source)
     return JSONResponse(content=response.model_dump())
+
+
+def _sse(event: dict) -> str:
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+@app.post("/api/chat/stream")
+def chat_stream(payload: ChatRequest, x_client_source: str | None = Header(default=None)):
+    """带进度的对话接口（SSE）。
+
+    一次分析可能要经历"理解 → 调工具 → 校验 → 可能修复"好几轮，十几秒没有反馈
+    用户会以为卡死。这里把每个阶段推给前端；最终结果仍是一条完整 JSON，
+    前端解析逻辑与 /api/chat 完全一致，接口挂了也能回退。
+    """
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="问题不能为空")
+
+    source = db.SOURCE_VALIDATION if x_client_source == db.SOURCE_VALIDATION else db.SOURCE_WEB
+    session = store.get_or_create(payload.session_id)
+
+    def event_stream():
+        events: queue.Queue = queue.Queue()
+
+        def progress(phase: str, data: dict) -> None:
+            events.put({"type": "progress", "phase": phase, **(data or {})})
+
+        def worker() -> None:
+            try:
+                response = handle_message(message, session, source=source, progress=progress)
+                events.put({"type": "result", "payload": response.model_dump()})
+            except Exception as exc:  # 后台线程里的异常必须转成事件，否则前端会一直等
+                events.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
+            finally:
+                events.put(None)
+
+        yield _sse({"type": "start", "session_id": session.session_id})
+        threading.Thread(target=worker, daemon=True).start()
+        while True:
+            item = events.get()
+            if item is None:
+                break
+            yield _sse(item)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/history")

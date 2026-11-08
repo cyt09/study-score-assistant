@@ -910,6 +910,17 @@ body {
   box-shadow: 0 18px 38px -34px rgba(160, 30, 30, 0.9);
 }
 .error-card h4 { margin: 0 0 6px; font-size: 12.5px; font-weight: 650; color: var(--danger); }
+.error-code {
+  display: inline-block;
+  margin: 0 0 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(214, 69, 69, 0.1);
+  color: var(--danger);
+  font-size: 9.5px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  letter-spacing: 0.03em;
+}
 .error-detail { margin-top: 6px; font-size: 11.5px; color: #9b4a4a; word-break: break-all; }
 
 /* 加载态 */
