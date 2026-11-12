@@ -49,7 +49,7 @@ SQLite 落库 (app/db.py) + 运行日志 (app/runlog.py, logs/*.jsonl)
 
 ## 安装与启动
 
-**最省事的方式（Windows）**：双击项目根目录的 `start.bat`，脚本会自动检查虚拟环境、
+**Windows**：双击项目根目录的 `start.bat`，脚本会自动检查虚拟环境、
 安装依赖、启动服务并打开浏览器；检查测试可双击 `verify.bat`。
 
 命令行方式：
@@ -138,28 +138,9 @@ docs/            验证记录、AI 使用说明、改进说明、检索评估
 6. **结构化输出靠解析 + 校验**：未使用厂商的原生 JSON mode 强约束（工具调用与 JSON mode 不能同时启用），异常输出会触发一次修复重试，仍失败则返回明确错误。
 7. 图表中文字体依赖系统字体（Windows 下使用微软雅黑）；缺失字体的系统会退回英文标签，数值不受影响。
 
-## AI 使用披露
+## AI 使用说明
 
-本项目在开发过程中使用了 AI 辅助（说明与自查过程见 `docs/AI使用说明.md`）。
-
-## 发布到 GitHub
-
-仓库已初始化 git 并完成首次提交，推送步骤：
-
-```bash
-# 1. 在 GitHub 网页上新建一个空仓库（不要勾选自动生成 README/.gitignore）
-# 2. 关联远程并推送
-git remote add origin https://github.com/<你的用户名>/<仓库名>.git
-git push -u origin main
-```
-
-推送前自检（敏感信息确认）：
-
-```bash
-git ls-files | grep -E "\.env$|\.venv|data/.*\.db|data/charts" || echo "无敏感文件被跟踪"
-grep -rn "sk-" --include="*.py" --include="*.js" --include="*.md" app scripts tests docs \
-  | grep -v "sk-your-key-here\|sk-invalid" || echo "无硬编码密钥"
-```
+本项目在开发过程中使用了 AI 辅助（说明文件见 `docs/AI使用说明.md`）。
 
 `.env`、`data/history.db`、`data/charts/`、`logs/run.jsonl` 均在 `.gitignore` 中，
 不会进入仓库；随仓库提交的 `logs/validation_*.jsonl` 是脱敏后的验证日志。
