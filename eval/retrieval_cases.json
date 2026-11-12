@@ -2,7 +2,7 @@
   "note": "检索评估集：positive 表示知识库确实覆盖，应该命中指定文件；negative 表示知识库不覆盖，应当返回空命中（明确说资料不足）。",
   "top_k": 3,
   "cases": [
-    {"query": "怎么安排复习时间比较合理", "should_hit": true, "expect": "学习效率与成绩提升.md", "type": "paraphrase"},
+    {"query": "怎么安排复习时间比较合理", "should_hit": true, "expect": "学习效率与成绩提升.md", "type": "paraphrase"}, 
     {"query": "主动回忆和反复看书哪个更有效", "should_hit": true, "expect": "学习效率与成绩提升.md", "type": "term"},
     {"query": "间隔重复是什么意思，怎么用", "should_hit": true, "expect": "学习效率与成绩提升.md", "type": "term"},
     {"query": "错题本要怎么用才有效", "should_hit": true, "expect": "学习效率与成绩提升.md", "type": "term"},
