@@ -372,5 +372,36 @@ class SearchImprovementTest(DBTestCase):
         self.assertIn("idx_analyses_session", names)
 
 
+class StreamErrorEventTest(unittest.TestCase):
+    """流式接口失败时也要把错误码推给前端，否则卡片上只剩一句"请求失败"。"""
+
+    def test_stream_error_carries_error_code(self):
+        from fastapi.testclient import TestClient
+
+        import app.main as main
+
+        original = main.handle_message
+
+        def boom(*args, **kwargs):
+            raise LLMError("无法连接模型服务", "Connection error: getaddrinfo failed", code="CONNECTION")
+
+        main.handle_message = boom
+        try:
+            client = TestClient(main.app)
+            response = client.post("/api/chat/stream", json={"message": "第五次呢？"})
+        finally:
+            main.handle_message = original
+
+        events = [
+            json.loads(line[len("data:"):].strip())
+            for line in response.text.splitlines()
+            if line.startswith("data:")
+        ]
+        error = next(event for event in events if event.get("type") == "error")
+        self.assertEqual(error["error_code"], "CONNECTION")
+        self.assertEqual(error["error"], "无法连接模型服务")
+        self.assertIn("getaddrinfo", error["error_detail"])
+
+
 if __name__ == "__main__":
     unittest.main()

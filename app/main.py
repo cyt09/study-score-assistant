@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from app import db
 from app.agent import handle_message
+from app.llm import LLMError
 from app.session import store
 from app.tools.retrieval import knowledge_base
 from config import BASE_DIR, settings
@@ -100,6 +101,17 @@ def chat_stream(payload: ChatRequest, x_client_source: str | None = Header(defau
             try:
                 response = handle_message(message, session, source=source, progress=progress)
                 events.put({"type": "result", "payload": response.model_dump()})
+            except LLMError as exc:
+                # 错误码和排查信息一起推给前端，卡片上才能看出是超时、断网还是 Key 失效
+                events.put(
+                    {
+                        "type": "error",
+                        "message": exc.message,
+                        "error": exc.message,
+                        "error_code": exc.code,
+                        "error_detail": exc.detail,
+                    }
+                )
             except Exception as exc:  # 后台线程里的异常必须转成事件，否则前端会一直等
                 events.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
             finally:

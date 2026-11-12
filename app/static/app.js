@@ -335,13 +335,24 @@ async function consumeStream(response, loading) {
       } else if (event.type === "result") {
         result = event.payload;
       } else if (event.type === "error") {
-        failure = event.message;
+        // 后端会把错误码与排查信息一起推来，整条留存给错误卡片用
+        failure = event;
       }
     }
   }
 
   if (result) return { ok: true, payload: result };
-  throw new Error(failure || "连接中断，没有收到完整结果");
+  if (failure) {
+    return {
+      ok: false,
+      payload: {
+        error: failure.error || failure.message || "请求失败",
+        error_code: failure.error_code,
+        error_detail: failure.error_detail,
+      },
+    };
+  }
+  throw new Error("连接中断，没有收到完整结果");
 }
 
 /* 老接口兜底：流式不可用（代理缓冲、浏览器不支持 ReadableStream）时仍能正常对话 */
@@ -390,7 +401,14 @@ async function sendMessage(text) {
     loading.wrapper.remove();
 
     if (!outcome.ok) {
-      renderError({ error: outcome.httpError || "请求失败", error_detail: "请求被后端拒绝" });
+      const failed = outcome.payload || {};
+      renderError({
+        error: failed.error || outcome.httpError || "请求失败",
+        error_code: failed.error_code,
+        error_detail: failed.error_detail || "请求被后端拒绝",
+      });
+      // 失败同样会落库，刷新一下左侧就能看到这条「调用失败」记录
+      refreshHistoryView();
       return;
     }
 
