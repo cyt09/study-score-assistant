@@ -1370,6 +1370,138 @@ function openScoreDialog(mode) {
   dialog.addEventListener("close", () => dialog.remove());
 }
 
+/* ---------- 提问选题弹窗（问因果 / 查学习方法） ---------- */
+const TOPIC_PRESETS = {
+  why: {
+    title: "问因果",
+    confirm: "发送这个问题",
+    options: [
+      "是不是因为我增加了学习时间，成绩才提高？",
+      "成绩下降是因为这次试卷特别难吗？",
+      "最近成绩忽高忽低，可能是什么原因？",
+      "分数提高是我水平变了，还是这次题目简单？",
+    ],
+  },
+  method: {
+    title: "查学习方法",
+    confirm: "发送这个问题",
+    options: [
+      "如何提高复习效率？",
+      "考前一周应该怎么复习？",
+      "错题本应该怎么用才有效？",
+      "上课容易走神、专注不下来怎么办？",
+    ],
+  },
+};
+
+function openTopicDialog(mode) {
+  const preset = TOPIC_PRESETS[mode];
+  if (!preset) return;
+  const existing = document.querySelector(".topic-dialog");
+  if (existing) existing.remove();
+
+  const dialog = document.createElement("dialog");
+  dialog.className = "record-dialog topic-dialog";
+
+  const head = document.createElement("div");
+  head.className = "dialog-head";
+  const headText = document.createElement("div");
+  const kicker = document.createElement("div");
+  kicker.className = "dialog-kicker";
+  kicker.textContent = "Question Topics";
+  const title = document.createElement("h3");
+  title.className = "dialog-title";
+  title.textContent = preset.title;
+  headText.append(kicker, title);
+  head.appendChild(headText);
+
+  const body = document.createElement("div");
+  body.className = "dialog-body";
+
+  const hint = document.createElement("p");
+  hint.className = "score-hint";
+  hint.textContent = "下面是常见的提问方向，点选一个；都不合适的话，可以在下方自己补充。";
+  body.appendChild(hint);
+
+  let selected = null;
+  const list = document.createElement("div");
+  list.className = "choice-list";
+  preset.options.forEach((text) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "choice-item";
+    item.textContent = text;
+    item.addEventListener("click", () => {
+      if (selected) selected.classList.remove("selected");
+      selected = item;
+      item.classList.add("selected");
+      customBox.classList.remove("invalid");
+    });
+    list.appendChild(item);
+  });
+  body.appendChild(list);
+
+  const divider = document.createElement("p");
+  divider.className = "choice-divider";
+  divider.textContent = "都不合适？自己补充：";
+  body.appendChild(divider);
+
+  const customBox = document.createElement("textarea");
+  customBox.className = "choice-custom";
+  customBox.rows = 2;
+  customBox.maxLength = 500;
+  customBox.placeholder = "用一句话写下你想问的问题，例如：为什么我刷了很多题分数还是没变？";
+  customBox.addEventListener("input", () => {
+    customBox.classList.remove("invalid");
+    if (selected) {
+      selected.classList.remove("selected");
+      selected = null;
+    }
+  });
+  body.appendChild(customBox);
+
+  const errorTip = document.createElement("p");
+  errorTip.className = "score-error";
+  errorTip.hidden = true;
+  body.appendChild(errorTip);
+
+  const foot = document.createElement("div");
+  foot.className = "dialog-foot";
+
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "dialog-ghost";
+  cancel.textContent = "取消";
+  cancel.addEventListener("click", () => dialog.close());
+
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.className = "dialog-close";
+  confirm.textContent = preset.confirm;
+  confirm.addEventListener("click", () => {
+    const custom = customBox.value.trim();
+    if (custom) {
+      dialog.close();
+      sendMessage(custom);
+      return;
+    }
+    if (selected) {
+      dialog.close();
+      sendMessage(selected.textContent);
+      return;
+    }
+    customBox.classList.add("invalid");
+    errorTip.textContent = "请先点选上面一个问题，或在下方自己写一个。";
+    errorTip.hidden = false;
+  });
+
+  foot.append(cancel, confirm);
+  dialog.append(head, body, foot);
+  document.body.appendChild(dialog);
+  dialog.showModal();
+  dialog.addEventListener("close", () => dialog.remove());
+}
+
 function showRecord(item) {
   const existing = document.querySelector(".record-dialog");
   if (existing) existing.remove();
@@ -1552,7 +1684,8 @@ el.input.addEventListener("keydown", (event) => {
 
 el.input.addEventListener("input", autoGrowInput);
 
-document.querySelectorAll(".chip").forEach((chip) => {
+/* 纯提问类快捷按钮：带 data-text 的点击直接发送（数据类按钮走各自的弹窗） */
+document.querySelectorAll(".chip[data-text]").forEach((chip) => {
   chip.addEventListener("click", () => {
     const text = chip.dataset.text || chip.textContent;
     el.input.value = text;
@@ -1564,6 +1697,8 @@ document.querySelectorAll(".chip").forEach((chip) => {
 /* 数据类快捷入口：先弹出填空，填入用户自己的成绩再发送 */
 document.getElementById("chip-score-trend")?.addEventListener("click", () => openScoreDialog("trend"));
 document.getElementById("chip-score-predict")?.addEventListener("click", () => openScoreDialog("predict"));
+document.getElementById("chip-why")?.addEventListener("click", () => openTopicDialog("why"));
+document.getElementById("chip-method")?.addEventListener("click", () => openTopicDialog("method"));
 
 el.messages.addEventListener("scroll", updateScrollButton, { passive: true });
 

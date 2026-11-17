@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>成绩分析工作台</title>
-  <link rel="stylesheet" href="/static/style.css?v=20261117b" />
+  <link rel="stylesheet" href="/static/style.css?v=20261117c" />
 </head>
 <body>
   <!-- 图标符号：全部内联，避免外部依赖 -->
@@ -161,8 +161,8 @@
           <div class="examples">
             <button class="chip" id="chip-score-trend">输入成绩看趋势</button>
             <button class="chip" id="chip-score-predict">输入成绩并预测</button>
-            <button class="chip" data-text="是不是因为我增加了学习时间，成绩才提高？">问因果</button>
-            <button class="chip" data-text="如何提高复习效率？">查学习方法</button>
+            <button class="chip" id="chip-why">问因果</button>
+            <button class="chip" id="chip-method">查学习方法</button>
           </div>
           <div class="empty-foot">支持 0—150 分 · 至少 2 次成绩 · 结果含限制条件</div>
         </div>
@@ -257,6 +257,6 @@
   </div>
 
   <script type="module" src="/static/bg.js"></script>
-  <script src="/static/app.js?v=20261117b"></script>
+  <script src="/static/app.js?v=20261117c"></script>
 </body>
 </html>
