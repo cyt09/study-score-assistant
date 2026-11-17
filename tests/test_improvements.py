@@ -27,6 +27,7 @@ from app.llm import LLMClient, LLMError  # noqa: E402
 from app.schemas import FinalAnswer  # noqa: E402
 from app.session import SessionStore, store  # noqa: E402
 from app.tools.retrieval import search_knowledge  # noqa: E402
+from app.tools.target import plan_for_target  # noqa: E402
 from app.tools.trend import analyze_trend  # noqa: E402
 
 TEMP_DB = Path(tempfile.mkdtemp()) / "improvements.db"
@@ -401,6 +402,92 @@ class StreamErrorEventTest(unittest.TestCase):
         self.assertEqual(error["error_code"], "CONNECTION")
         self.assertEqual(error["error"], "无法连接模型服务")
         self.assertIn("getaddrinfo", error["error_detail"])
+
+
+class TargetPlanTest(DBTestCase):
+    """目标倒推：差距与所需斜率由程序算，模型不能改。"""
+
+    def test_plan_math(self):
+        plan = plan_for_target(slope=3.3, intercept=75.0, target=95, x=5, prediction=91.5)
+        self.assertTrue(plan["ok"])
+        self.assertAlmostEqual(plan["gap"], 3.5, places=2)
+        self.assertAlmostEqual(plan["needed_slope"], 4.0, places=2)
+        self.assertAlmostEqual(plan["extra_per_exam"], 0.7, places=2)
+        self.assertEqual(plan["verdict"], "short")
+
+    def test_plan_reports_reached(self):
+        plan = plan_for_target(slope=4.0, intercept=70.0, target=88, x=5, prediction=90.0)
+        self.assertTrue(plan["ok"])
+        self.assertEqual(plan["verdict"], "reached")
+        self.assertLess(plan["gap"], 0)
+
+    def test_plan_rejects_bad_input(self):
+        self.assertEqual(plan_for_target(3.0, 70, 200, 5, 85)["error_code"], "INVALID_TARGET")
+        self.assertEqual(plan_for_target(3.0, 70, 90, None, None)["error_code"], "NO_TARGET_POSITION")
+
+    def test_target_hint_parsing(self):
+        self.assertEqual(agent._target_score_hint("第五次想考到 95 分"), 95.0)
+        self.assertEqual(agent._target_score_hint("目标是达到90分"), 90.0)
+        self.assertIsNone(agent._target_score_hint("四次成绩 78、82、85、88"))
+
+    def test_end_to_end_injects_plan(self):
+        data = payload()
+        data.update({"slope": 3.3, "intercept": 75.0, "prediction": 91.5})
+        fake = FakeClient([
+            tool_call_response("analyze_score_trend",
+                               {"x": [1, 2, 3, 4], "y": [78, 82, 85, 88], "predict_x": 5}),
+            content_response(data),
+        ])
+        original = agent.build_client
+        agent.build_client = lambda: fake
+        try:
+            response = agent.handle_message(
+                "四次 78、82、85、88，第五次想考到 95 分，还差多少？",
+                store.get_or_create(None),
+            )
+        finally:
+            agent.build_client = original
+        self.assertIsNone(response.error)
+        self.assertIsNotNone(response.target_plan)
+        self.assertAlmostEqual(response.target_plan["gap"], 3.5, places=2)
+        self.assertAlmostEqual(response.target_plan["needed_slope"], 4.0, places=2)
+
+
+class HistoryToolTest(DBTestCase):
+    """历史对比：跨会话查最近分析，差值由程序计算。"""
+
+    def _seed(self, session_id: str, y: list[float], predict_x: int) -> int:
+        result = analyze_trend([1, 2, 3, 4][: len(y)], y, predict_x)
+        return db.save_analysis(session_id, f"{session_id} 的成绩分析", result, answer_text="上升")
+
+    def test_recent_analyses_marks_current_session(self):
+        self._seed("old-session", [70, 72, 74, 76], 5)
+        newest = self._seed("new-session", [78, 82, 85, 88], 5)
+        rows = db.list_recent_analyses(limit=5, current_session="new-session")
+        self.assertEqual(rows[0]["id"], newest)
+        self.assertTrue(rows[0]["same_session"])
+        self.assertFalse(rows[1]["same_session"])
+
+    def test_tool_returns_empty_when_no_records(self):
+        result, summary = agent._execute_tool("list_past_analyses", {"limit": 3})
+        self.assertEqual(result["count"], 0)
+        self.assertIn("没有找到", result["message"])
+        self.assertIn("无记录", summary)
+
+    def test_tool_returns_records_and_comparison(self):
+        self._seed("old-session", [70, 72, 74, 76], 5)
+        current = analyze_trend([1, 2, 3, 4], [78, 82, 85, 88], 5)
+        session = SimpleNamespace(session_id="another-session")
+        result, summary = agent._execute_tool(
+            "list_past_analyses", {"limit": 5, "compare_with_current": True}, session, current
+        )
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["records"][0]["scores"], [70, 72, 74, 76])
+        comparison = result["comparison"]
+        self.assertAlmostEqual(
+            comparison["slope_delta"], round(current["slope"] - analyze_trend([1, 2, 3, 4], [70, 72, 74, 76], 5)["slope"], 2)
+        )
+        self.assertIn("差值", summary)
 
 
 if __name__ == "__main__":

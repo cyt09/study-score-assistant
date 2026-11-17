@@ -82,6 +82,8 @@ class ChatResponse(BaseModel):
     chart_url: str | None = None
     # 预测区间由工具计算、程序直接下发，不经过模型转述，避免被写错或省略
     prediction_interval: dict | None = None
+    # 目标倒推结果（目标分、差距、所需斜率），同样由程序计算后直接下发
+    target_plan: dict | None = None
     # 需要用户补充/修正时下发的可操作卡片：前端据此渲染输入框和快捷选项，
     # 而不是只让用户自己看文字说明后重新打字。
     fix: dict | None = None

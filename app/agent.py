@@ -22,6 +22,7 @@ from app.llm import _cn_to_int as cn_to_int
 from app.runlog import RunLogger
 from app.schemas import ChatResponse, FinalAnswer, ToolCallRecord
 from app.tools.retrieval import search_knowledge
+from app.tools.target import plan_for_target
 from app.tools.trend import _MAX_SCORE, TrendError, analyze_trend
 
 SYSTEM_PROMPT = """你是"学习与成绩分析助手"，帮助学生分析考试成绩的变化趋势，并结合学习资料给出可执行的建议。
@@ -34,6 +35,8 @@ SYSTEM_PROMPT = """你是"学习与成绩分析助手"，帮助学生分析考�
 5. 预测位置只能来自用户原话。用户没说第几次（例如只说"帮我预测成绩""按这个趋势预测一下"）时：调用 analyze_score_trend 不要传 predict_x，回答只讲趋势、拟合质量与限制条件，并用 need_followup 询问想预测第几次；此时回答里不得出现任何具体预测分数，也不允许把"下一次"当默认位置。用户明确说了第几次（含"下次/下一次"）时，才传 predict_x，并原样使用工具返回的 prediction。
 6. 会话已经保存了用户上一次提供的数据，用户追问"第五次呢"时直接复用，不要重复索要成绩。
 7. 工具返回 prediction_interval 时，answer 里除了点估计还要给出区间，例如"第 5 次约 91.5 分，95% 预测区间 88.9—94.1 分"；不允许只给一个精确分数，也不允许改动区间上下限。
+8. 用户问"上次分析结果是什么""和上一次比怎么样""以前算过几次"这类回顾性问题时，必须先调用 list_past_analyses 查库；查不到就如实说没有记录，禁止凭对话记忆复述历史数字。工具返回 comparison 时，差值只能原样引用，不要自己再算一遍。
+9. 用户提到目标分数（如"想考到 95 分""第五次要上 90"）时，程序会在工具结果后给出【程序计算】的目标差距与所需斜率，answer 必须原样引用这些数字（差多少、斜率需要提高到多少），不要自行推算。
 
 输出格式（只输出一个 JSON 对象，不要加 Markdown 代码块、不要加解释文字）：
 {
@@ -110,12 +113,42 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_past_analyses",
+            "description": (
+                "查询用户过去保存的分析记录（跨会话，按时间倒序），返回每次分析的原始成绩、斜率、R² 与预测值。"
+                "凡是要求回顾历史的问题（如“我上次分析结果是什么”“和上一次比怎么样”“之前算过几次”），"
+                "必须先调用本工具，不得凭对话记忆编造历史数字。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回最近多少条，默认 5，最多 10",
+                    },
+                    "keyword": {
+                        "type": "string",
+                        "description": "可选：按关键词过滤历史记录的问题或回答，例如“期末”“数学”",
+                    },
+                    "compare_with_current": {
+                        "type": "boolean",
+                        "description": "是否与本次分析结果对比；本次已有拟合结果时传 true，工具会给出斜率与预测的差值",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 GUARD_PROMPT = """你上一条回答没有调用任何工具，但规则要求先取证再作答：
 - 涉及成绩（哪怕只给了一个分数）→ 必须先调用 analyze_score_trend，数据是否够由工具判断；
 - 涉及学习方法、复习策略、成绩波动，或你不确定知识库是否覆盖 → 必须先调用 search_study_knowledge，
-  检索返回空才能说"资料不足"。
+  检索返回空才能说"资料不足"；
+- 涉及"上次/以前/之前那次分析"这类历史回顾 → 必须先调用 list_past_analyses，查不到就说没有记录。
 请现在调用合适的工具，拿到工具结果后再组织最终 JSON 回答。"""
 
 REPAIR_PROMPT = """你上一条输出无法通过程序的字段校验，错误如下：
@@ -130,7 +163,8 @@ def _needs_tool(text: str) -> bool:
     if len(text) < 4:
         return False
     keywords = ("成绩", "分", "考", "复习", "学习", "趋势", "预测", "怎么", "如何",
-                "为什么", "是什么", "吗", "？", "?", "能帮")
+                "为什么", "是什么", "吗", "？", "?", "能帮",
+                "上次", "上一次", "之前", "以前", "历史", "记录")
     return any(keyword in text for keyword in keywords)
 
 
@@ -178,6 +212,42 @@ def _predict_position_hint(text: str) -> int | str | None:
     if _NEXT_PATTERN.search(text) and (wants_predict or short_ask):
         return "next"
     return None
+
+
+# 目标分：必须有"考到/达到/目标"这类意图词，避免把成绩串里的数字当成目标
+_TARGET_PATTERN = re.compile(
+    r"(?:考到|考取|考上|达到|目标|想考|希望能考|希望考|冲到|提到|提高到|提升到|上)"
+    r"\s*([0-9]{1,3}(?:\.[0-9])?)\s*分"
+)
+
+
+def _target_score_hint(text: str) -> float | None:
+    """从用户原话里取"想考到多少分"。没有明确目标就返回 None。"""
+    text = (text or "").strip()
+    if not text:
+        return None
+    match = _TARGET_PATTERN.search(text)
+    if not match:
+        return None
+    try:
+        value = float(match.group(1))
+    except ValueError:
+        return None
+    if not (0 <= value <= _MAX_SCORE):
+        return None
+    return value
+
+
+def _target_note(plan: dict[str, Any]) -> str:
+    """把目标倒推结果整理成模型必须原样引用的一段程序提示。"""
+    return (
+        "【程序计算·目标倒推】"
+        f"目标 {plan['target']:g} 分，第 {plan['x']:g} 次预计 {plan['prediction']:.1f} 分，"
+        f"差距 {plan['gap']:+.1f} 分；当前斜率 {plan['current_slope']:.2f} 分/次，"
+        f"要在第 {plan['x']:g} 次达到目标需要 {plan['needed_slope']:.2f} 分/次"
+        f"（每次多提 {plan['extra_per_exam']:.2f} 分）。"
+        "这些数字由程序计算，回答中只能原样引用，不要自行推算或改动。"
+    )
 
 
 _SCORE_DELIM = re.compile(r"[、,，;；|]+")
@@ -396,7 +466,8 @@ def _align_predict_arguments(
 
 
 
-def _execute_tool(name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], str]:
+def _execute_tool(name: str, arguments: dict[str, Any],
+                  session: Any = None, current_trend: dict[str, Any] | None = None) -> tuple[dict[str, Any], str]:
     """执行工具，返回 (结果, 一句话摘要)。工具异常统一转成结构化错误，交给模型解释。"""
     if name == "analyze_score_trend":
         try:
@@ -419,6 +490,74 @@ def _execute_tool(name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any],
             titles = "、".join(hit["title"] for hit in result["hits"])
             return result, f"[{result.get('mode')}] 检索命中 {len(result['hits'])} 个片段：{titles}"
         return result, f"[{result.get('mode')}] 检索无命中：{result.get('message', '')}"
+
+    if name == "list_past_analyses":
+        try:
+            limit = int(arguments.get("limit") or 5)
+        except (TypeError, ValueError):
+            limit = 5
+        session_id = getattr(session, "session_id", None)
+        records = db.list_recent_analyses(
+            limit=limit,
+            keyword=arguments.get("keyword"),
+            current_session=session_id,
+        )
+        if not records:
+            result = {
+                "ok": True,
+                "count": 0,
+                "records": [],
+                "message": "没有找到历史分析记录（这是一次全新的分析，或记录已被删除）",
+            }
+            return result, "历史查询：无记录"
+
+        slim = [
+            {
+                "id": record["id"],
+                "when": record["created_at"],
+                "question": record["question"],
+                "scores": record["y"],
+                "slope": record["slope"],
+                "r2": record["r2"],
+                "predict_x": record.get("predict_x"),
+                "prediction": record["prediction"],
+                "same_session": record.get("same_session", False),
+            }
+            for record in records[:limit]
+        ]
+        result: dict[str, Any] = {
+            "ok": True,
+            "count": len(slim),
+            "records": slim,
+            "message": f"找到 {len(slim)} 条历史分析记录（按时间倒序，same_session=true 表示属于当前会话）",
+        }
+
+        # 与本次拟合结果对比时，差值一律由程序算好，模型只负责转述
+        if arguments.get("compare_with_current") and current_trend and current_trend.get("slope") is not None:
+            previous = next((item for item in slim if item["slope"] is not None), None)
+            if previous is not None:
+                result["comparison"] = {
+                    "previous_id": previous["id"],
+                    "previous_when": previous["when"],
+                    "slope_delta": round(float(current_trend["slope"]) - float(previous["slope"]), 2),
+                    "r2_delta": (
+                        round(float(current_trend["r2"]) - float(previous["r2"]), 4)
+                        if current_trend.get("r2") is not None and previous["r2"] is not None
+                        else None
+                    ),
+                    "prediction": current_trend.get("prediction"),
+                    "previous_prediction": previous["prediction"],
+                    "prediction_delta": (
+                        round(float(current_trend["prediction"]) - float(previous["prediction"]), 2)
+                        if current_trend.get("prediction") is not None and previous["prediction"] is not None
+                        else None
+                    ),
+                    "note": "差值为程序计算，正数表示本次高于上次，只能原样引用，不要自行再算一遍",
+                }
+        summary = f"历史查询：命中 {len(slim)} 条"
+        if "comparison" in result:
+            summary += f"，与记录 #{result['comparison']['previous_id']} 的斜率和预测差值已算好"
+        return result, summary
 
     return {"ok": False, "error_code": "UNKNOWN_TOOL", "message": f"未注册的工具 {name}"}, "工具不存在"
 
@@ -832,6 +971,8 @@ def _run_message(user_text: str, session, source: str = db.SOURCE_WEB,
     score_gap = _score_list_gap(user_text)
     # 原话里出现负分/超上限的成绩：不让残缺或异常数据进入拟合
     score_invalid = _score_list_invalid(user_text)
+    # 用户说了目标分（"第五次想考到 95"）时，差距与所需斜率由程序算，不让模型估
+    target_hint = _target_score_hint(user_text)
 
     base_messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     base_messages.extend(session.messages)
@@ -840,6 +981,7 @@ def _run_message(user_text: str, session, source: str = db.SOURCE_WEB,
     last_trend: dict[str, Any] | None = None
     last_retrieval: dict[str, Any] | None = None
     last_tool_error: dict[str, Any] | None = None
+    target_plan: dict[str, Any] | None = None
     chart_url: str | None = None
     final_text = ""
     messages = list(base_messages)
@@ -1019,7 +1161,7 @@ def _run_message(user_text: str, session, source: str = db.SOURCE_WEB,
                             {"hint": position_hint, "arguments": arguments, "note": guard_note},
                         )
 
-                result, summary = _execute_tool(name, arguments)
+                result, summary = _execute_tool(name, arguments, session, last_trend)
                 logger.log(
                     "tool",
                     "executed",
@@ -1034,6 +1176,22 @@ def _run_message(user_text: str, session, source: str = db.SOURCE_WEB,
                     chart_url = result.get("chart_url")
                     # 后面成功了就不需要再让用户改数据
                     last_tool_error = None
+                    # 目标倒推：用户给了目标分时，差值一律程序算，模型只负责转述
+                    if target_hint is not None:
+                        plan = plan_for_target(
+                            slope=result["slope"],
+                            intercept=result["intercept"],
+                            target=target_hint,
+                            x=result.get("predict_x"),
+                            prediction=result.get("prediction"),
+                        )
+                        if plan.get("ok"):
+                            target_plan = plan
+                            note = _target_note(plan)
+                            guard_note = f"{guard_note}\n{note}" if guard_note else note
+                            logger.log("guard", "target_plan", plan)
+                        else:
+                            logger.log("guard", "target_plan_skipped", plan)
                 elif name == "analyze_score_trend":
                     # 记录失败上下文（原始输入 + 错误码 + 出错位置），用于生成"改哪里"的可操作卡片
                     last_tool_error = {"result": result, "arguments": arguments}
@@ -1195,6 +1353,7 @@ def _run_message(user_text: str, session, source: str = db.SOURCE_WEB,
         tool_calls=tool_records,
         chart_url=chart_url,
         prediction_interval=(last_trend or {}).get("prediction_interval"),
+        target_plan=target_plan,
         fix=_build_fix(last_tool_error, last_trend),
         run_id=run_id,
     )

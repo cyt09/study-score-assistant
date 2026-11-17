@@ -152,6 +152,15 @@ function renderAnswer(payload) {
       ),
     );
   }
+  // 目标倒推：差距与所需斜率同样由程序算好
+  if (payload.target_plan && payload.target_plan.ok) {
+    const plan = payload.target_plan;
+    stats.appendChild(statBlock("目标分", `${formatNum(plan.target)} 分`));
+    stats.appendChild(
+      statBlock("距目标", plan.gap > 0 ? `还差 ${formatNum(plan.gap)} 分` : `已超出 ${formatNum(-plan.gap)} 分`),
+    );
+    stats.appendChild(statBlock("所需斜率", `${formatNum(plan.needed_slope)} 分/次`));
+  }
   card.appendChild(stats);
 
   if (payload.chart_url) {
@@ -299,10 +308,15 @@ const PHASE_TEXT = {
     if (event.by === "program") return "正在补充检索本地资料…";
     if (event.name === "analyze_score_trend") return "正在拟合成绩趋势…";
     if (event.name === "search_study_knowledge") return "正在检索本地资料…";
+    if (event.name === "list_past_analyses") return "正在查历史分析记录…";
     return "正在调用工具…";
   },
   tool_done: (event) =>
-    event.name === "search_study_knowledge" ? "已拿到资料，正在组织回答…" : "已算出结果，正在组织回答…",
+    event.name === "search_study_knowledge"
+      ? "已拿到资料，正在组织回答…"
+      : event.name === "list_past_analyses"
+        ? "已取到历史记录，正在对比…"
+        : "已算出结果，正在组织回答…",
   repair: () => "输出格式不合格，正在自动修正…",
 };
 

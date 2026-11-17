@@ -433,6 +433,31 @@ def list_session_records(session_id: str) -> list[dict[str, Any]]:
     return [_row_to_record(row) for row in rows]
 
 
+def list_recent_analyses(limit: int = 5, keyword: str | None = None,
+                         current_session: str | None = None) -> list[dict[str, Any]]:
+    """跨会话取最近的分析记录（只取趋势类），用于"上次分析结果是什么"这类回顾。
+
+    与 list_session_records 的区别：那个按会话取全部，这个按时间倒序取全局最近若干条，
+    并且标出每条是否属于当前会话，方便模型说清"本次 / 上一次"。
+    """
+    limit = max(1, min(int(limit), 10))
+    clauses = [f"source = '{SOURCE_WEB}'", "kind = 'trend'"]
+    params: list[Any] = []
+    kw = (keyword or "").strip()
+    if kw:
+        clauses.append("(question LIKE ? ESCAPE '\\' OR answer_text LIKE ? ESCAPE '\\')")
+        like = f"%{_escape_like(kw)}%"
+        params.extend([like, like])
+    sql = f"SELECT * FROM analyses WHERE {' AND '.join(clauses)} ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    with _LOCK, closing(_connect()) as conn:
+        rows = conn.execute(sql, params).fetchall()
+    records = [_row_to_record(row) for row in rows]
+    for record in records:
+        record["same_session"] = bool(current_session) and record["session_id"] == current_session
+    return records
+
+
 def delete_analysis(record_id: int) -> dict[str, Any]:
     """删除单条分析记录（按 id）。
 
