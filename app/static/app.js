@@ -1170,6 +1170,206 @@ function dialogRow(label, value) {
   return p;
 }
 
+/* ---------- 成绩填空弹窗 ---------- */
+const SCORE_MIN = 0;
+const SCORE_MAX = 150;
+const SCORE_FIELDS_MIN = 2;
+const SCORE_FIELDS_MAX = 8;
+
+function openScoreDialog(mode) {
+  const existing = document.querySelector(".score-dialog");
+  if (existing) existing.remove();
+
+  const isPredict = mode === "predict";
+  const dialog = document.createElement("dialog");
+  dialog.className = "record-dialog score-dialog";
+
+  const head = document.createElement("div");
+  head.className = "dialog-head";
+  const headText = document.createElement("div");
+  const kicker = document.createElement("div");
+  kicker.className = "dialog-kicker";
+  kicker.textContent = "Score Input";
+  const title = document.createElement("h3");
+  title.className = "dialog-title";
+  title.textContent = isPredict ? "输入成绩并预测" : "输入你的考试成绩";
+  headText.append(kicker, title);
+  head.appendChild(headText);
+
+  const body = document.createElement("div");
+  body.className = "dialog-body";
+
+  const hint = document.createElement("p");
+  hint.className = "score-hint";
+  hint.textContent = "按考试时间顺序填写，支持 0—150 分，至少 2 次；填好后点击下方按钮开始分析。";
+  body.appendChild(hint);
+
+  const fieldsBox = document.createElement("div");
+  fieldsBox.className = "score-fields";
+  body.appendChild(fieldsBox);
+
+  const fields = [];
+
+  function addField() {
+    const label = document.createElement("label");
+    label.className = "score-field";
+    const span = document.createElement("span");
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = String(SCORE_MIN);
+    input.max = String(SCORE_MAX);
+    input.step = "0.5";
+    input.placeholder = "如 78";
+    input.addEventListener("input", () => label.classList.remove("invalid"));
+    label.append(span, input);
+    fieldsBox.appendChild(label);
+    fields.push({ label, span, input });
+  }
+
+  function renumber() {
+    fields.forEach((f, i) => {
+      f.span.textContent = `第 ${i + 1} 次`;
+    });
+  }
+
+  for (let i = 0; i < 4; i += 1) addField();
+  renumber();
+
+  const tools = document.createElement("div");
+  tools.className = "score-tools";
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "score-tool-btn";
+  addBtn.textContent = "＋ 添加一次考试";
+  const removeBtn = document.createElement("button");
+  removeBtn.type = "button";
+  removeBtn.className = "score-tool-btn quiet";
+  removeBtn.textContent = "－ 删去最后一次";
+  tools.append(addBtn, removeBtn);
+  body.appendChild(tools);
+
+  addBtn.addEventListener("click", () => {
+    if (fields.length >= SCORE_FIELDS_MAX) return;
+    addField();
+    renumber();
+    syncPredictDefault();
+  });
+  removeBtn.addEventListener("click", () => {
+    if (fields.length <= SCORE_FIELDS_MIN) return;
+    const last = fields.pop();
+    last.label.remove();
+    renumber();
+    syncPredictDefault();
+  });
+
+  let predictTouched = false;
+  let predictRow = null;
+  let predictInput = null;
+  if (isPredict) {
+    predictRow = document.createElement("div");
+    predictRow.className = "predict-row";
+    const predictLabel = document.createElement("span");
+    predictLabel.textContent = "预测第";
+    predictInput = document.createElement("input");
+    predictInput.type = "number";
+    predictInput.min = "1";
+    predictInput.step = "1";
+    predictInput.addEventListener("input", () => {
+      predictTouched = true;
+      predictRow.classList.remove("invalid");
+    });
+    const predictUnit = document.createElement("span");
+    predictUnit.textContent = "次的成绩";
+    predictRow.append(predictLabel, predictInput, predictUnit);
+    body.appendChild(predictRow);
+    syncPredictDefault();
+  }
+
+  function syncPredictDefault() {
+    if (predictInput && !predictTouched) predictInput.value = String(fields.length + 1);
+  }
+
+  const errorTip = document.createElement("p");
+  errorTip.className = "score-error";
+  errorTip.hidden = true;
+  body.appendChild(errorTip);
+
+  function showError(msg) {
+    errorTip.textContent = msg;
+    errorTip.hidden = false;
+  }
+
+  function collectScores() {
+    let ok = true;
+    const values = [];
+    fields.forEach((f) => {
+      const raw = f.input.value.trim();
+      const num = Number(raw);
+      if (raw === "" || Number.isNaN(num) || num < SCORE_MIN || num > SCORE_MAX) {
+        f.label.classList.add("invalid");
+        ok = false;
+      } else {
+        f.label.classList.remove("invalid");
+        values.push(num);
+      }
+    });
+    if (!ok) {
+      showError(`每次成绩都需要填写，且在 ${SCORE_MIN}—${SCORE_MAX} 分之间。`);
+      return null;
+    }
+    return values;
+  }
+
+  function collectPredictX() {
+    if (!predictInput) return null;
+    const raw = predictInput.value.trim();
+    const num = Number(raw);
+    if (!predictTouched && raw === "") predictInput.value = String(fields.length + 1);
+    const value = Number(predictInput.value);
+    if (predictInput.value.trim() === "" || Number.isNaN(value) || value < 1 || !Number.isInteger(value)) {
+      predictRow.classList.add("invalid");
+      showError("预测次数需要是正整数，例如 5。");
+      return null;
+    }
+    predictRow.classList.remove("invalid");
+    return value;
+  }
+
+  const foot = document.createElement("div");
+  foot.className = "dialog-foot";
+
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "dialog-ghost";
+  cancel.textContent = "取消";
+  cancel.addEventListener("click", () => dialog.close());
+
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.className = "dialog-close";
+  confirm.textContent = isPredict ? "开始预测" : "开始分析";
+  confirm.addEventListener("click", () => {
+    const scores = collectScores();
+    if (!scores) return;
+    let message;
+    if (isPredict) {
+      const x = collectPredictX();
+      if (x === null) return;
+      message = `这是我最近${scores.length}次考试的成绩：${scores.join("、")}，帮我预测第${x}次。`;
+    } else {
+      message = `这是我最近${scores.length}次考试的成绩：${scores.join("、")}，帮我看看变化趋势。`;
+    }
+    dialog.close();
+    sendMessage(message);
+  });
+
+  foot.append(cancel, confirm);
+  dialog.append(head, body, foot);
+  document.body.appendChild(dialog);
+  dialog.showModal();
+  dialog.addEventListener("close", () => dialog.remove());
+}
+
 function showRecord(item) {
   const existing = document.querySelector(".record-dialog");
   if (existing) existing.remove();
@@ -1360,6 +1560,10 @@ document.querySelectorAll(".chip").forEach((chip) => {
     sendMessage(text);
   });
 });
+
+/* 数据类快捷入口：先弹出填空，填入用户自己的成绩再发送 */
+document.getElementById("chip-score-trend")?.addEventListener("click", () => openScoreDialog("trend"));
+document.getElementById("chip-score-predict")?.addEventListener("click", () => openScoreDialog("predict"));
 
 el.messages.addEventListener("scroll", updateScrollButton, { passive: true });
 

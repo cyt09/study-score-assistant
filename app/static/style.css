@@ -1236,6 +1236,95 @@ body {
 }
 .dialog-close:hover { transform: translateY(-1px); }
 
+/* ---------- 成绩填空弹窗 ---------- */
+.score-dialog { width: min(460px, calc(100vw - 32px)); }
+.score-hint { margin: 0 0 14px; font-size: 12.5px; line-height: 1.7; color: var(--muted); }
+.score-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.score-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.score-field input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.score-field input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: var(--ring);
+}
+.score-field.invalid input {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 4px rgba(220, 75, 75, 0.12);
+}
+.score-tools { display: flex; gap: 8px; margin-top: 14px; }
+.score-tool-btn {
+  padding: 7px 14px;
+  border: 1px solid rgba(53, 99, 233, 0.35);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--brand);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: transform 0.18s var(--spring), background 0.18s ease;
+}
+.score-tool-btn:hover { background: #f0f5ff; transform: translateY(-1px); }
+.score-tool-btn.quiet { border-color: var(--line-strong); color: var(--muted); }
+.score-tool-btn.quiet:hover { background: #f5f7fb; }
+.predict-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.predict-row input {
+  width: 76px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  text-align: center;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.predict-row input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: var(--ring);
+}
+.predict-row.invalid input {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 4px rgba(220, 75, 75, 0.12);
+}
+.score-error { margin: 10px 0 0; font-size: 12.5px; color: var(--danger); }
+.dialog-ghost {
+  padding: 7px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: transform 0.18s var(--spring), background 0.18s ease;
+}
+.dialog-ghost:hover { background: #f5f7fb; transform: translateY(-1px); }
+
 /* ---------- 滚动渐入 ---------- */
 .reveal {
   opacity: 0;
