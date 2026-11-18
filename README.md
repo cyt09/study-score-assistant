@@ -52,8 +52,11 @@ SQLite 落库 (app/db.py) + 运行日志 (app/runlog.py, logs/*.jsonl)
 
 ## 安装与启动
 
-**Windows**：双击项目根目录的 `start.bat`，脚本会自动检查虚拟环境、
-安装依赖、启动服务并打开浏览器；检查测试可双击 `verify.bat`。
+前提三样：Python 3.11+（`python --version` 能看到版本号）、一个 DeepSeek API Key（[申请地址](https://platform.deepseek.com/api_keys)）、能访问 `api.deepseek.com` 的网络。
+
+**Windows**：双击项目根目录的 `start.bat`，脚本会自动创建虚拟环境、安装依赖、启动服务并打开浏览器；检查测试可双击 `verify.bat`。`.env` 缺失时脚本会提示，但服务仍会启动，此时页面显示"未配置 API Key"的失败卡片。
+
+**macOS / Linux**：没有 bat 脚本，按下面的命令行方式操作。
 
 命令行方式：
 
@@ -79,6 +82,13 @@ python -m uvicorn app.main:app --port 8000
 # 5. 打开 http://127.0.0.1:8000
 ```
 
+两个容易卡住的地方：
+
+- **装依赖很慢或超时**：换国内镜像源，`pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`。首次安装 numpy、matplotlib 体积较大，正常也要一两分钟。
+- **没有 Key 也想先看看界面**：把 `.env` 里 `LLM_MOCK` 改成 `1`，会用本地桩模型跑通完整链路（能出趋势、图表、记录），但回答是固定规则拼的，不能代表真实效果。
+
+首次启动会自动创建 `data/` 和 `data/charts/`，并给 `knowledge/` 下 4 篇资料建索引（`/api/health` 里 `knowledge_files` 为 4 说明加载正常）。第一张图表会慢几秒，因为 matplotlib 要建字体缓存。
+
 ## 配置方法
 
 所有配置都在 `.env`（参考 `.env.example`，仓库中不含密钥）：
@@ -92,11 +102,13 @@ python -m uvicorn app.main:app --port 8000
 | `MAX_TOOL_ROUNDS` | 工具调用最大轮次（防死循环） | `4` |
 | `RETRIEVAL_TOP_K` / `RETRIEVAL_MIN_SCORE` | 检索条数与最低得分 | `3` / `1.2` |
 
+**改完 `.env` 必须重启服务才生效**：配置在进程启动时读取一次并固定在内存里，运行中改文件不起作用。判断是否生效看 `/api/health` 里的 `api_key_configured` 字段。
+
 ## 测试与验证
 
 ```bash
-# 单元/流程测试（44 项，不需要 API Key）
-python -m unittest tests.test_pipeline -v
+# 单元/流程测试（79 项，不需要 API Key）
+python -m unittest tests.test_pipeline tests.test_improvements -v
 
 # 数值验证：独立实现 + 手算答案双重核对
 python scripts/verify_calc.py
@@ -128,7 +140,7 @@ app/
   static/        前端单页
 knowledge/       检索用学习资料（4 篇，获取说明见 knowledge/README.md）
 scripts/         verify_calc.py 数值验证 / run_validation.py 场景验证
-tests/           78 项单元与流程测试
+tests/           79 项单元与流程测试
 docs/            验证记录、AI 使用说明
 ```
 
