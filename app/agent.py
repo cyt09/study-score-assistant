@@ -572,7 +572,7 @@ def _predict_options(xs: Any, count: int = 3) -> list[int]:
 
 
 def _invalid_score_indexes(values: Any) -> list[int]:
-    """挑出明显不合法的成绩位置（1-based）：非数字、非有限数、负数、超过 150 分。"""
+    """挑出明显不合法的成绩位置（1-based）：非数字、非有限数、负数、超过 100 分。"""
     bad: list[int] = []
     for index, raw in enumerate(values or [], start=1):
         try:

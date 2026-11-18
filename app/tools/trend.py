@@ -24,8 +24,8 @@ from config import settings
 
 _CJK_FONT_READY: bool | None = None
 
-# 成绩有效上限：同时覆盖百分制（100）与 150 分制（如高考语数外），负数一律无效
-_MAX_SCORE = 150.0
+# 成绩有效上限：百分制 100 分，负数一律无效
+_MAX_SCORE = 100.0
 
 # t 分布双侧 95% 临界值（自由度 1—30），自由度再大就收敛到 1.96。
 # 不引入 scipy：常用的几个值查表即可，也便于逐行核对。
@@ -150,7 +150,7 @@ def _validate_pair(x: list[float], y: list[float], predict_x: float | None) -> f
             {"field": "y", "count": len(x)},
         )
 
-    # 成绩必须是真实考试里可能出现的数值：负数、超过 150 分（百分制/150 分制上限）都视为无效
+    # 成绩必须是真实考试里可能出现的数值：负数、超过 100 分（百分制上限）都视为无效
     bad_scores = [(i, v) for i, v in enumerate(y, start=1) if v < 0 or v > _MAX_SCORE]
     if bad_scores:
         detail = "、".join(f"第 {i} 个 {v:g} 分" for i, v in bad_scores[:4])

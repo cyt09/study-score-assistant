@@ -1105,7 +1105,7 @@ function buildFixCard(fix) {
     input.type = "text";
     input.inputMode = "decimal";
     input.value = value;
-    input.placeholder = "0—150";
+    input.placeholder = `${SCORE_MIN}—${SCORE_MAX}`;
     cell.append(span, input);
     grid.appendChild(cell);
     inputs.push(input);
@@ -1154,9 +1154,9 @@ function buildFixCard(fix) {
     for (const input of inputs) {
       const raw = input.value.trim();
       if (!raw) continue;
-      if (!/^\d+(\.\d+)?$/.test(raw) || Number(raw) > 150) {
+      if (!/^\d+(\.\d+)?$/.test(raw) || Number(raw) > SCORE_MAX) {
         input.parentElement.classList.add("invalid");
-        tip.textContent = `「${raw}」不是有效成绩：请填 0—150 之间的数字`;
+        tip.textContent = `「${raw}」不是有效成绩：请填 ${SCORE_MIN}—${SCORE_MAX} 之间的数字`;
         return;
       }
       input.parentElement.classList.remove("invalid");
@@ -1186,7 +1186,7 @@ function dialogRow(label, value) {
 
 /* ---------- 成绩填空弹窗 ---------- */
 const SCORE_MIN = 0;
-const SCORE_MAX = 150;
+const SCORE_MAX = 100;
 const SCORE_FIELDS_MIN = 2;
 const SCORE_FIELDS_MAX = 8;
 
@@ -1215,7 +1215,7 @@ function openScoreDialog(mode) {
 
   const hint = document.createElement("p");
   hint.className = "score-hint";
-  hint.textContent = "按考试时间顺序填写，支持 0—150 分，至少 2 次；填好后点击下方按钮开始分析。";
+  hint.textContent = `按考试时间顺序填写，支持 ${SCORE_MIN}—${SCORE_MAX} 分，至少 2 次；填好后点击下方按钮开始分析。`;
   body.appendChild(hint);
 
   const fieldsBox = document.createElement("div");

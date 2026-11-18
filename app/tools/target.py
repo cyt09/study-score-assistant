@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-_MAX_SCORE = 150
+_MAX_SCORE = 100
 
 
 def plan_for_target(

@@ -151,9 +151,16 @@ class TrendToolTest(unittest.TestCase):
         self.assertIn("-20", ctx.exception.message)
 
     def test_reject_over_max_score(self):
+        # 百分制：100 分是合法上限，101 分就要拒绝
         with self.assertRaises(TrendError) as ctx:
-            analyze_trend([1, 2, 3], [120, 180, 90])
+            analyze_trend([1, 2, 3], [88, 101, 90])
         self.assertEqual(ctx.exception.code, "INVALID_SCORE")
+        self.assertIn("0—100", ctx.exception.message)
+
+    def test_accept_full_mark(self):
+        result = analyze_trend([1, 2, 3], [88, 100, 95])
+        self.assertTrue(result["ok"])
+        self.assertAlmostEqual(result["slope"], 3.5)
 
     def test_reject_invalid_x(self):
         with self.assertRaises(TrendError) as ctx:
