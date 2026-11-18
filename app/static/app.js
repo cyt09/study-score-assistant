@@ -747,21 +747,21 @@ function drawSparkline(values) {
   const dots = points
     .map(([x, y], i) =>
       i === points.length - 1
-        ? `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="6" fill="rgba(64,123,156,.16)"/><circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="3" fill="#407b9c"/>`
-        : `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="1.8" fill="#fff" stroke="#8aa8bd" stroke-width="1.2"/>`
+        ? `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="6" fill="rgba(54,96,146,.16)"/><circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="3" fill="#366092"/>`
+        : `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="1.8" fill="#fff" stroke="#8fa9c4" stroke-width="1.2"/>`
     )
     .join("");
 
   el.sparkline.innerHTML = `
     <defs>
       <linearGradient id="sparkStroke" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0%" stop-color="#407b9c"/>
-        <stop offset="60%" stop-color="#7faecb"/>
-        <stop offset="100%" stop-color="#e8a25c"/>
+        <stop offset="0%" stop-color="#2a4d78"/>
+        <stop offset="60%" stop-color="#366092"/>
+        <stop offset="100%" stop-color="#7aa5cf"/>
       </linearGradient>
       <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="rgba(64,123,156,.22)"/>
-        <stop offset="100%" stop-color="rgba(64,123,156,0)"/>
+        <stop offset="0%" stop-color="rgba(54,96,146,.22)"/>
+        <stop offset="100%" stop-color="rgba(54,96,146,0)"/>
       </linearGradient>
     </defs>
     <line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="rgba(15,27,51,.07)" stroke-dasharray="3 4"/>

@@ -49,14 +49,14 @@ if (canvas) {
     ctx.save();
     ctx.lineWidth = 1.2;
     ctx.setLineDash([7, 9]);
-    ctx.strokeStyle = "rgba(64, 123, 156, 0.18)";
+    ctx.strokeStyle = "rgba(54, 96, 146, 0.2)";
     ctx.beginPath();
     ctx.moveTo(left, bottom);
     ctx.lineTo(right, top);
     ctx.stroke();
 
     // 上下各偏移一点，形成"趋势带"，比单线更像图表
-    ctx.strokeStyle = "rgba(201, 138, 46, 0.13)";
+    ctx.strokeStyle = "rgba(232, 162, 92, 0.13)";
     offset(ctx, left, bottom, right, top, -26, height);
     offset(ctx, left, bottom, right, top, 26, height);
     ctx.restore();
@@ -85,7 +85,7 @@ if (canvas) {
 
       ctx.beginPath();
       ctx.arc(x, clamp(y, 24, height - 24), radius, 0, Math.PI * 2);
-      ctx.fillStyle = warm ? "rgba(232, 162, 92, 0.22)" : "rgba(64, 123, 156, 0.16)";
+      ctx.fillStyle = warm ? "rgba(232, 162, 92, 0.22)" : "rgba(54, 96, 146, 0.18)";
       ctx.fill();
     }
     ctx.restore();
