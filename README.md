@@ -84,10 +84,10 @@ python -m uvicorn app.main:app --port 8000
 
 两个容易卡住的地方：
 
-- **装依赖很慢或超时**：换国内镜像源，`pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`。首次安装 numpy、matplotlib 体积较大，正常也要一两分钟。
+- **装依赖很慢或超时**：换国内镜像源，`pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`。
 - **没有 Key 也想先看看界面**：把 `.env` 里 `LLM_MOCK` 改成 `1`，会用本地桩模型跑通完整链路（能出趋势、图表、记录），但回答是固定规则拼的，不能代表真实效果。
 
-首次启动会自动创建 `data/` 和 `data/charts/`，并给 `knowledge/` 下 4 篇资料建索引（`/api/health` 里 `knowledge_files` 为 4 说明加载正常）。第一张图表会慢几秒，因为 matplotlib 要建字体缓存。
+首次启动会自动创建 `data/` 和 `data/charts/`，并给 `knowledge/` 下 4 篇资料建索引（`/api/health` 里 `knowledge_files` 为 4 说明加载正常）。
 
 ## 配置方法
 
