@@ -223,7 +223,7 @@ def _render_chart(xs: list[float], ys: list[float], slope: float, intercept: flo
     chinese = _setup_chinese_font()
     fig, ax = plt.subplots(figsize=(6.4, 4.0), dpi=140)
 
-    ax.scatter(xs, ys, s=52, color="#366092", zorder=3,
+    ax.scatter(xs, ys, s=52, color="#4A82B4", zorder=3,
                label="实际成绩" if chinese else "Actual score")
 
     line_x = np.linspace(min(xs), max(xs), 100)
