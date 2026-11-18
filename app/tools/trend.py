@@ -223,12 +223,12 @@ def _render_chart(xs: list[float], ys: list[float], slope: float, intercept: flo
     chinese = _setup_chinese_font()
     fig, ax = plt.subplots(figsize=(6.4, 4.0), dpi=140)
 
-    ax.scatter(xs, ys, s=52, color="#2f6fed", zorder=3,
+    ax.scatter(xs, ys, s=52, color="#1f7a58", zorder=3,
                label="实际成绩" if chinese else "Actual score")
 
     line_x = np.linspace(min(xs), max(xs), 100)
     line_y = slope * line_x + intercept
-    ax.plot(line_x, line_y, color="#f2994a", linewidth=2,
+    ax.plot(line_x, line_y, color="#d98e32", linewidth=2,
             label="线性拟合" if chinese else "Linear fit")
 
     if predict_x is not None and prediction is not None:

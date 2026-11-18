@@ -4,14 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>成绩分析工作台</title>
-  <link rel="stylesheet" href="/static/style.css?v=20261117c" />
+  <link rel="stylesheet" href="/static/style.css?v=20261118a" />
 </head>
 <body>
   <!-- 图标符号：全部内联，避免外部依赖 -->
   <svg class="sprite" aria-hidden="true" focusable="false">
     <symbol id="i-spark" viewBox="0 0 24 24">
-      <path d="M12 3.2 13.9 9l5.9 1.9-5.9 1.9L12 18.6l-1.9-5.8L4.2 10.9 10.1 9 12 3.2Z" fill="currentColor" opacity=".92"/>
-      <path d="M18.4 15.3l.9 2.3 2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9.9-2.3Z" fill="currentColor" opacity=".55"/>
+      <!-- 品牌记号：四次考试的分数走势线（第 3 次小幅回落，整体上升） -->
+      <path d="M4 17.2 9.2 11.6l4.1 2.7 6.7-6.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="4" cy="17.2" r="1.8" fill="currentColor"/>
+      <circle cx="9.2" cy="11.6" r="1.8" fill="currentColor"/>
+      <circle cx="13.3" cy="14.3" r="1.8" fill="currentColor"/>
+      <circle cx="20" cy="7.4" r="1.8" fill="currentColor"/>
     </symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24">
       <path d="M20 12a8 8 0 1 1-2.4-5.7M20 4.5V10h-5.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
@@ -257,6 +261,6 @@
   </div>
 
   <script type="module" src="/static/bg.js"></script>
-  <script src="/static/app.js?v=20261117d"></script>
+  <script src="/static/app.js?v=20261118a"></script>
 </body>
 </html>

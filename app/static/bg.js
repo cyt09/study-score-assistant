@@ -53,17 +53,17 @@ function boot() {
 
   /* 粒子场：靠近相机的一层偏大偏亮，远处一层细密铺底 */
   const layers = [
-    makeDust({ count: 460, spread: [26, 15, 10], size: 0.06, opacity: 0.55, colors: ["#4f7cff", "#9a7cff"] }),
-    makeDust({ count: 700, spread: [34, 20, 16], size: 0.032, opacity: 0.38, colors: ["#6ea8ff", "#3fd6e0"] }),
+    makeDust({ count: 460, spread: [26, 15, 10], size: 0.06, opacity: 0.55, colors: ["#3f9273", "#8fbc7f"] }),
+    makeDust({ count: 700, spread: [34, 20, 16], size: 0.032, opacity: 0.38, colors: ["#9ecaa8", "#dfc07c"] }),
   ];
   layers.forEach((dots) => world.add(dots));
 
   /* 漂浮几何体：线框，低透明度，停在画面两侧避免与内容抢视线 */
   const shapes = [
-    shape(new THREE.IcosahedronGeometry(1.55, 1), 0x4f7cff, 0.26, [-4.6, 1.15, -1.4], 0.16),
-    shape(new THREE.TorusKnotGeometry(0.62, 0.18, 110, 14), 0x8b5cf6, 0.3, [4.5, -1.45, -0.8], -0.12),
-    shape(new THREE.OctahedronGeometry(0.92), 0x22c1e0, 0.32, [3.6, 2.15, -3.2], 0.2),
-    shape(new THREE.IcosahedronGeometry(0.58, 0), 0xe0a44f, 0.22, [-3.5, -2.3, -2.6], -0.24),
+    shape(new THREE.IcosahedronGeometry(1.55, 1), 0x3f9273, 0.26, [-4.6, 1.15, -1.4], 0.16),
+    shape(new THREE.TorusKnotGeometry(0.62, 0.18, 110, 14), 0xc9a15f, 0.3, [4.5, -1.45, -0.8], -0.12),
+    shape(new THREE.OctahedronGeometry(0.92), 0x6fae86, 0.32, [3.6, 2.15, -3.2], 0.2),
+    shape(new THREE.IcosahedronGeometry(0.58, 0), 0xb9862e, 0.22, [-3.5, -2.3, -2.6], -0.24),
   ];
   shapes.forEach((m) => world.add(m));
 
