@@ -49,7 +49,7 @@ if (canvas) {
     ctx.save();
     ctx.lineWidth = 1.2;
     ctx.setLineDash([7, 9]);
-    ctx.strokeStyle = "rgba(31, 122, 88, 0.16)";
+    ctx.strokeStyle = "rgba(64, 123, 156, 0.18)";
     ctx.beginPath();
     ctx.moveTo(left, bottom);
     ctx.lineTo(right, top);
@@ -85,7 +85,7 @@ if (canvas) {
 
       ctx.beginPath();
       ctx.arc(x, clamp(y, 24, height - 24), radius, 0, Math.PI * 2);
-      ctx.fillStyle = warm ? "rgba(201, 138, 46, 0.2)" : "rgba(31, 122, 88, 0.16)";
+      ctx.fillStyle = warm ? "rgba(232, 162, 92, 0.22)" : "rgba(64, 123, 156, 0.16)";
       ctx.fill();
     }
     ctx.restore();
